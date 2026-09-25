@@ -8,3 +8,5 @@ crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
 flutter_rust_bridge = "2.13.0"
+wgpu = "22"
+pollster = "0.3"
