@@ -42,10 +42,11 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   if (husk_renderer_) {
+    KillTimer(GetHandle(), kHuskRenderTimerId);
     husk_bridge_.DestroyRenderer(husk_renderer_);
     husk_renderer_ = nullptr;
   }
-
+  
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -71,6 +72,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case WM_TIMER:
+      if (wparam == kHuskRenderTimerId && husk_renderer_) {
+        husk_bridge_.RenderFrame(husk_renderer_);
+        husk_texture_registrar_->MarkTextureFrameAvailable(husk_texture_id_);
+      }
+      break;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
@@ -92,11 +99,14 @@ void FlutterWindow::SetUpHuskTexture() {
     OutputDebugStringA("Husk: failed to load husk_core.dll\n");
     return;
   }
-
   const uint32_t width = 256;
   const uint32_t height = 256;
   husk_renderer_ = husk_bridge_.CreateRenderer(width, height);
   husk_bridge_.RenderFrame(husk_renderer_);
+
+  // ~30 FPS test loop. Will be replaced with a proper render/vsync loop
+  // once real scene content exists.
+  SetTimer(GetHandle(), kHuskRenderTimerId, 33, nullptr);
 
   husk_texture_ = std::make_unique<flutter::TextureVariant>(
 

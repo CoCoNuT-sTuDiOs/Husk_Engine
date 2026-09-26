@@ -10,3 +10,5 @@ crate-type = ["cdylib", "staticlib", "lib"]
 flutter_rust_bridge = "2.13.0"
 wgpu = "22"
 pollster = "0.3"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.29"

@@ -44,6 +44,7 @@ class FlutterWindow : public Win32Window {
 
   HuskBridge husk_bridge_;
   void* husk_renderer_ = nullptr;
+  static constexpr UINT_PTR kHuskRenderTimerId = 1;
   
   // Method channel used to hand the texture ID to Dart.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
