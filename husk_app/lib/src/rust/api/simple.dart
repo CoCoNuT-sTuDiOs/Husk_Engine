@@ -8,3 +8,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
+
+/// Casts a ray from a screen-space point (in pixels, matching the active
+/// renderer's own width/height) and returns the world-space point where
+/// it hits the currently loaded mesh, if any.
+(double, double, double)? pick({required double x, required double y}) =>
+    RustLib.instance.api.crateApiSimplePick(x: x, y: y);

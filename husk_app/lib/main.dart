@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:husk_app/src/rust/api/simple.dart';
 import 'package:husk_app/src/rust/frb_generated.dart';
 
 const MethodChannel _huskChannel = MethodChannel('husk/texture');
@@ -46,6 +47,23 @@ class _HuskTextureViewState extends State<HuskTextureView> {
     });
   }
 
+  void _handleTap(TapDownDetails details) {
+    final hit = pick(
+      x: details.localPosition.dx,
+      y: details.localPosition.dy,
+    );
+
+    if (hit != null) {
+      final (x, y, z) = hit;
+      debugPrint(
+        'Husk pick hit at (${x.toStringAsFixed(3)}, '
+        '${y.toStringAsFixed(3)}, ${z.toStringAsFixed(3)})',
+      );
+    } else {
+      debugPrint('Husk pick: no hit');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_textureId == null) {
@@ -55,7 +73,10 @@ class _HuskTextureViewState extends State<HuskTextureView> {
       child: SizedBox(
         width: 256,
         height: 256,
-        child: Texture(textureId: _textureId!),
+        child: GestureDetector(
+          onTapDown: _handleTap,
+          child: Texture(textureId: _textureId!),
+        ),
       ),
     );
   }
