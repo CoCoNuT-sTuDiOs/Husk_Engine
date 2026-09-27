@@ -28,48 +28,6 @@ impl Vertex {
     }
 }
 
-const CUBE_VERTICES: &[Vertex] = &[
-    // Front (+z)
-    Vertex { position: [-0.5, -0.5, 0.5], normal: [0.0, 0.0, 1.0] },
-    Vertex { position: [0.5, -0.5, 0.5], normal: [0.0, 0.0, 1.0] },
-    Vertex { position: [0.5, 0.5, 0.5], normal: [0.0, 0.0, 1.0] },
-    Vertex { position: [-0.5, 0.5, 0.5], normal: [0.0, 0.0, 1.0] },
-    // Back (-z)
-    Vertex { position: [0.5, -0.5, -0.5], normal: [0.0, 0.0, -1.0] },
-    Vertex { position: [-0.5, -0.5, -0.5], normal: [0.0, 0.0, -1.0] },
-    Vertex { position: [-0.5, 0.5, -0.5], normal: [0.0, 0.0, -1.0] },
-    Vertex { position: [0.5, 0.5, -0.5], normal: [0.0, 0.0, -1.0] },
-    // Right (+x)
-    Vertex { position: [0.5, -0.5, 0.5], normal: [1.0, 0.0, 0.0] },
-    Vertex { position: [0.5, -0.5, -0.5], normal: [1.0, 0.0, 0.0] },
-    Vertex { position: [0.5, 0.5, -0.5], normal: [1.0, 0.0, 0.0] },
-    Vertex { position: [0.5, 0.5, 0.5], normal: [1.0, 0.0, 0.0] },
-    // Left (-x)
-    Vertex { position: [-0.5, -0.5, -0.5], normal: [-1.0, 0.0, 0.0] },
-    Vertex { position: [-0.5, -0.5, 0.5], normal: [-1.0, 0.0, 0.0] },
-    Vertex { position: [-0.5, 0.5, 0.5], normal: [-1.0, 0.0, 0.0] },
-    Vertex { position: [-0.5, 0.5, -0.5], normal: [-1.0, 0.0, 0.0] },
-    // Top (+y)
-    Vertex { position: [-0.5, 0.5, 0.5], normal: [0.0, 1.0, 0.0] },
-    Vertex { position: [0.5, 0.5, 0.5], normal: [0.0, 1.0, 0.0] },
-    Vertex { position: [0.5, 0.5, -0.5], normal: [0.0, 1.0, 0.0] },
-    Vertex { position: [-0.5, 0.5, -0.5], normal: [0.0, 1.0, 0.0] },
-    // Bottom (-y)
-    Vertex { position: [-0.5, -0.5, -0.5], normal: [0.0, -1.0, 0.0] },
-    Vertex { position: [0.5, -0.5, -0.5], normal: [0.0, -1.0, 0.0] },
-    Vertex { position: [0.5, -0.5, 0.5], normal: [0.0, -1.0, 0.0] },
-    Vertex { position: [-0.5, -0.5, 0.5], normal: [0.0, -1.0, 0.0] },
-];
-
-const CUBE_INDICES: &[u16] = &[
-    0, 1, 2, 2, 3, 0, // front
-    4, 5, 6, 6, 7, 4, // back
-    8, 9, 10, 10, 11, 8, // right
-    12, 13, 14, 14, 15, 12, // left
-    16, 17, 18, 18, 19, 16, // top
-    20, 21, 22, 22, 23, 20, // bottom
-];
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct SceneUniform {
@@ -99,16 +57,18 @@ pub struct Renderer {
     #[allow(dead_code)]
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
+    mesh_data: crate::asset_import::MeshData,
+    last_view_proj: glam::Mat4,
 }
 
 const BYTES_PER_PIXEL: u32 = 4;
 
 impl Renderer {
-    pub fn new(width: u32, height: u32) -> Self {
-        pollster::block_on(Self::new_async(width, height))
+    pub fn new(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {
+        pollster::block_on(Self::new_async(width, height, mesh))
     }
 
-    async fn new_async(width: u32, height: u32) -> Self {
+    async fn new_async(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {        
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -250,17 +210,29 @@ impl Renderer {
             cache: None,
         });
 
+        let mesh_vertices: Vec<Vertex> = mesh
+            .positions
+            .iter()
+            .zip(mesh.normals.iter())
+            .map(|(position, normal)| Vertex {
+                position: *position,
+                normal: *normal,
+            })
+            .collect();
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("husk_cube_vertex_buffer"),
-            contents: bytemuck::cast_slice(CUBE_VERTICES),
+            label: Some("husk_mesh_vertex_buffer"),
+            contents: bytemuck::cast_slice(&mesh_vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("husk_cube_index_buffer"),
-            contents: bytemuck::cast_slice(CUBE_INDICES),
+            label: Some("husk_mesh_index_buffer"),
+            contents: bytemuck::cast_slice(&mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+
+        let num_indices = mesh.indices.len() as u32;
 
         Self {
             device,
@@ -274,13 +246,16 @@ impl Renderer {
             pipeline,
             vertex_buffer,
             index_buffer,
-            num_indices: CUBE_INDICES.len() as u32,
+            num_indices,
             uniform_buffer,
             bind_group,
             depth_texture,
             depth_view,
+            mesh_data: mesh,
+            last_view_proj: glam::Mat4::IDENTITY,
         }
     }
+
 
     pub fn render_frame(&mut self) {
         let view = self
@@ -295,8 +270,10 @@ impl Renderer {
             glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 0.1, 100.0);
         let eye = glam::Vec3::new(0.0, 1.5, 3.0);
         let view_matrix = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y);
+
         let model = glam::Mat4::from_rotation_y(angle);
         let view_proj = projection * view_matrix * model;
+        self.last_view_proj = view_proj;
 
         let scene_uniform = SceneUniform {
             view_proj: view_proj.to_cols_array_2d(),
@@ -347,7 +324,7 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);           
             pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
 
@@ -397,5 +374,28 @@ impl Renderer {
 
     pub fn frame_len(&self) -> usize {
         self.last_frame.len()
+    }
+
+    /// The active mesh's raw vertex positions, in the same order used
+    /// everywhere else (skinning, picking) needed so weight computation
+    /// can be done against whatever mesh is actually loaded right now.
+    pub fn mesh_positions(&self) -> &[[f32; 3]] {
+        &self.mesh_data.positions
+    }
+
+    /// Casts a ray from a screen-space point (in pixels, matching this
+    /// renderer's own width/height) using the camera matrix from the most
+    /// recently rendered frame, and returns the world-space point where it
+    /// hits the mesh, if any.
+    pub fn pick(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
+        let ray = crate::picking::Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            self.last_view_proj,
+        );
+        crate::picking::ray_mesh_intersection(&ray, &self.mesh_data.positions, &self.mesh_data.indices)
+            .map(|hit| hit.point)
     }
 }

@@ -1,4 +1,9 @@
 pub mod api;
+pub mod asset_import;
 pub mod ffi;
 mod frb_generated;
 pub mod renderer;
+pub mod rig;
+pub mod picking;
+pub mod skinning;
+pub mod scene_state;

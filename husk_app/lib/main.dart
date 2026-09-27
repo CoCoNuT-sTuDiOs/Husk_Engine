@@ -17,9 +17,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: HuskTextureView(),
-      ),
+      home: Scaffold(body: HuskTextureView()),
     );
   }
 }
@@ -33,6 +31,7 @@ class HuskTextureView extends StatefulWidget {
 
 class _HuskTextureViewState extends State<HuskTextureView> {
   int? _textureId;
+  BigInt? _lastBoneIndex;
 
   @override
   void initState() {
@@ -48,20 +47,36 @@ class _HuskTextureViewState extends State<HuskTextureView> {
   }
 
   void _handleTap(TapDownDetails details) {
-    final hit = pick(
+    final result = placeBone(
       x: details.localPosition.dx,
       y: details.localPosition.dy,
+      parent: _lastBoneIndex,
     );
 
-    if (hit != null) {
-      final (x, y, z) = hit;
+    if (result != null) {
+      final (index, x, y, z) = result;
+      setState(() {
+        _lastBoneIndex = index;
+      });
       debugPrint(
-        'Husk pick hit at (${x.toStringAsFixed(3)}, '
-        '${y.toStringAsFixed(3)}, ${z.toStringAsFixed(3)})',
+        'Placed bone $index at (${x.toStringAsFixed(3)}, '
+        '${y.toStringAsFixed(3)}, ${z.toStringAsFixed(3)}) '
+        '— total bones: ${boneCount()}',
       );
     } else {
-      debugPrint('Husk pick: no hit');
+      debugPrint('Bone placement: click missed the mesh');
     }
+
+  }
+
+
+  void _handleComputeWeights() {
+    final success = computeWeights();
+    debugPrint(
+      success
+          ? 'Weights computed for ${boneCount()} bones'
+          : 'Weight computation failed (no bones placed yet?)',
+    );
   }
 
   @override
@@ -70,13 +85,23 @@ class _HuskTextureViewState extends State<HuskTextureView> {
       return const Center(child: CircularProgressIndicator());
     }
     return Center(
-      child: SizedBox(
-        width: 256,
-        height: 256,
-        child: GestureDetector(
-          onTapDown: _handleTap,
-          child: Texture(textureId: _textureId!),
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 256,
+            height: 256,
+            child: GestureDetector(
+              onTapDown: _handleTap,
+              child: Texture(textureId: _textureId!),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _handleComputeWeights,
+            child: const Text('Compute Weights'),
+          ),
+        ],
       ),
     );
   }

@@ -14,3 +14,44 @@ String greet({required String name}) =>
 /// it hits the currently loaded mesh, if any.
 (double, double, double)? pick({required double x, required double y}) =>
     RustLib.instance.api.crateApiSimplePick(x: x, y: y);
+
+/// Casts a ray from a screen-space point and, if it hits the mesh, places
+/// a new bone there in the current skeleton. If `parent` is given, the
+/// new bone becomes that bone's child (its position is stored relative
+/// to the parent, per the skeleton's bind-pose convention); otherwise
+/// it's a new root bone. Returns the new bone's index and world-space
+/// position, or `None` if the click missed the mesh.
+(BigInt, double, double, double)? placeBone({
+  required double x,
+  required double y,
+  BigInt? parent,
+}) => RustLib.instance.api.crateApiSimplePlaceBone(x: x, y: y, parent: parent);
+
+/// Returns the number of bones placed so far in the current skeleton.
+BigInt boneCount() => RustLib.instance.api.crateApiSimpleBoneCount();
+
+/// Runs auto skin-weighting (Section 3c's naive distance-based scheme)
+/// against the current skeleton and the active mesh, storing the result
+/// for inspection/editing. Returns false if there's no active renderer or
+/// no bones placed yet.
+bool computeWeights() => RustLib.instance.api.crateApiSimpleComputeWeights();
+
+/// Returns the given vertex's currently dominant bone and its weight, if
+/// weights have been computed yet.
+(BigInt, double)? getVertexDominantBone({required BigInt vertexIndex}) =>
+    RustLib.instance.api.crateApiSimpleGetVertexDominantBone(
+      vertexIndex: vertexIndex,
+    );
+
+/// Manual weight-paint touch-up: forces one vertex to be fully influenced
+/// by a single chosen bone, overriding whatever auto-weighting computed —
+/// the safety net for bad auto-weight spots described in the PRD. Returns
+/// false if weights haven't been computed yet or the vertex index is out
+/// of range.
+bool setVertexWeight({
+  required BigInt vertexIndex,
+  required BigInt boneIndex,
+}) => RustLib.instance.api.crateApiSimpleSetVertexWeight(
+  vertexIndex: vertexIndex,
+  boneIndex: boneIndex,
+);
