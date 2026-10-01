@@ -99,8 +99,8 @@ void FlutterWindow::SetUpHuskTexture() {
     OutputDebugStringA("Husk: failed to load husk_core.dll\n");
     return;
   }
-  const uint32_t width = 256;
-  const uint32_t height = 256;
+  const uint32_t width = 1000;
+  const uint32_t height = 1000;
   husk_renderer_ = husk_bridge_.CreateRenderer(width, height);
   husk_bridge_.RenderFrame(husk_renderer_);
 
@@ -138,8 +138,8 @@ const FlutterDesktopPixelBuffer* FlutterWindow::CopyHuskPixelBuffer(
     size_t width, size_t height) {
   husk_pixel_buffer_descriptor_.buffer =
       husk_bridge_.FramePtr(husk_renderer_);
-  husk_pixel_buffer_descriptor_.width = 256;
-  husk_pixel_buffer_descriptor_.height = 256;
+  husk_pixel_buffer_descriptor_.width = 1000;
+  husk_pixel_buffer_descriptor_.height = 1000;
   husk_pixel_buffer_descriptor_.release_callback = nullptr;
   husk_pixel_buffer_descriptor_.release_context = nullptr;
   return &husk_pixel_buffer_descriptor_;

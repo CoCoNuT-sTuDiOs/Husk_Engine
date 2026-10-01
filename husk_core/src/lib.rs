@@ -7,3 +7,8 @@ pub mod rig;
 pub mod picking;
 pub mod skinning;
 pub mod scene_state;
+pub mod animation;
+pub mod pose;
+pub mod voxel;
+pub mod geodesic;
+pub mod rig_import;

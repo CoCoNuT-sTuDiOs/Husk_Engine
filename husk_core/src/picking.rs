@@ -65,6 +65,37 @@ pub fn ray_mesh_intersection(
     closest
 }
 
+/// Finds where `ray` first enters the mesh and where it last leaves it,
+/// and returns the point halfway between them: the middle of whatever
+/// the ray passes through, not its front surface. If the ray only
+/// crosses the mesh once, the entry point comes back unchanged.
+pub fn ray_mesh_midpoint(
+    ray: &Ray,
+    positions: &[[f32; 3]],
+    indices: &[u32],
+) -> Option<glam::Vec3> {
+    let mut nearest: Option<f32> = None;
+    let mut farthest: Option<f32> = None;
+
+    for triangle in indices.chunks_exact(3) {
+        let v0 = glam::Vec3::from(positions[triangle[0] as usize]);
+        let v1 = glam::Vec3::from(positions[triangle[1] as usize]);
+        let v2 = glam::Vec3::from(positions[triangle[2] as usize]);
+
+        if let Some(t) = ray_triangle_intersection(ray, v0, v1, v2) {
+            if nearest.map_or(true, |n| t < n) {
+                nearest = Some(t);
+            }
+            if farthest.map_or(true, |f| t > f) {
+                farthest = Some(t);
+            }
+        }
+    }
+
+    let (near_t, far_t) = (nearest?, farthest?);
+    Some(ray.origin + ray.direction * ((near_t + far_t) * 0.5))
+}
+
 fn ray_triangle_intersection(ray: &Ray, v0: glam::Vec3, v1: glam::Vec3, v2: glam::Vec3) -> Option<f32> {
     const EPSILON: f32 = 1e-6;
 
@@ -95,5 +126,59 @@ fn ray_triangle_intersection(ray: &Ray, v0: glam::Vec3, v1: glam::Vec3, v2: glam
         Some(t)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two square faces facing each other: a front quad at z = 1 and a
+    /// back quad at z = -1, each spanning x, y in [-1, 1].
+    fn two_parallel_quads() -> (Vec<[f32; 3]>, Vec<u32>) {
+        let positions = vec![
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+        ];
+        let indices = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+        (positions, indices)
+    }
+
+    fn ray_down_z() -> Ray {
+        Ray {
+            origin: glam::Vec3::new(0.3, 0.2, 5.0),
+            direction: glam::Vec3::new(0.0, 0.0, -1.0),
+        }
+    }
+
+    #[test]
+    fn midpoint_lands_between_front_and_back_surface() {
+        let (positions, indices) = two_parallel_quads();
+        let mid = ray_mesh_midpoint(&ray_down_z(), &positions, &indices).unwrap();
+        assert!((mid - glam::Vec3::new(0.3, 0.2, 0.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn single_crossing_falls_back_to_entry_point() {
+        let (positions, indices) = two_parallel_quads();
+        // First six indices = the front quad only.
+        let mid = ray_mesh_midpoint(&ray_down_z(), &positions, &indices[..6]).unwrap();
+        assert!((mid - glam::Vec3::new(0.3, 0.2, 1.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn miss_returns_none() {
+        let (positions, indices) = two_parallel_quads();
+        let ray = Ray {
+            origin: glam::Vec3::new(5.0, 5.0, 5.0),
+            direction: glam::Vec3::new(0.0, 0.0, -1.0),
+        };
+        assert!(ray_mesh_midpoint(&ray, &positions, &indices).is_none());
     }
 }

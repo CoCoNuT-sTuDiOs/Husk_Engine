@@ -27,6 +27,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  (double, double) dco_decode_box_autoadd_record_f_32_f_32(dynamic raw);
+
+  @protected
   (double, double, double) dco_decode_box_autoadd_record_f_32_f_32_f_32(
     dynamic raw,
   );
@@ -48,7 +51,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  List<(double, double)?> dco_decode_list_opt_box_autoadd_record_f_32_f_32(
+    dynamic raw,
+  );
+
+  @protected
+  List<BigInt?> dco_decode_list_opt_box_autoadd_usize(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  (double, double)? dco_decode_opt_box_autoadd_record_f_32_f_32(dynamic raw);
 
   @protected
   (double, double, double)? dco_decode_opt_box_autoadd_record_f_32_f_32_f_32(
@@ -64,6 +78,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt? dco_decode_opt_box_autoadd_usize(dynamic raw);
+
+  @protected
+  (double, double) dco_decode_record_f_32_f_32(dynamic raw);
 
   @protected
   (double, double, double) dco_decode_record_f_32_f_32_f_32(dynamic raw);
@@ -92,6 +109,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  (double, double) sse_decode_box_autoadd_record_f_32_f_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   (double, double, double) sse_decode_box_autoadd_record_f_32_f_32_f_32(
     SseDeserializer deserializer,
   );
@@ -117,7 +139,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
+  List<(double, double)?> sse_decode_list_opt_box_autoadd_record_f_32_f_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BigInt?> sse_decode_list_opt_box_autoadd_usize(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  (double, double)? sse_decode_opt_box_autoadd_record_f_32_f_32(
+    SseDeserializer deserializer,
+  );
 
   @protected
   (double, double, double)? sse_decode_opt_box_autoadd_record_f_32_f_32_f_32(
@@ -137,6 +174,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt? sse_decode_opt_box_autoadd_usize(SseDeserializer deserializer);
+
+  @protected
+  (double, double) sse_decode_record_f_32_f_32(SseDeserializer deserializer);
 
   @protected
   (double, double, double) sse_decode_record_f_32_f_32_f_32(
@@ -170,6 +210,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_record_f_32_f_32(
+    (double, double) self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_record_f_32_f_32_f_32(
     (double, double, double) self,
     SseSerializer serializer,
@@ -197,8 +243,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_opt_box_autoadd_record_f_32_f_32(
+    List<(double, double)?> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_opt_box_autoadd_usize(
+    List<BigInt?> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_record_f_32_f_32(
+    (double, double)? self,
     SseSerializer serializer,
   );
 
@@ -222,6 +286,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_usize(BigInt? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_record_f_32_f_32(
+    (double, double) self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_record_f_32_f_32_f_32(

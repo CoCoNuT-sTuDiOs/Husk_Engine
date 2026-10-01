@@ -43,11 +43,73 @@ bool computeWeights() => RustLib.instance.api.crateApiSimpleComputeWeights();
       vertexIndex: vertexIndex,
     );
 
-/// Manual weight-paint touch-up: forces one vertex to be fully influenced
-/// by a single chosen bone, overriding whatever auto-weighting computed —
-/// the safety net for bad auto-weight spots described in the PRD. Returns
-/// false if weights haven't been computed yet or the vertex index is out
-/// of range.
+/// Rotates one bone to an absolute angle (degrees, around Z) measured
+/// from its original bind pose — not from wherever it currently is — so
+/// repeated calls don't compound. Recomputes skinning matrices for the
+/// whole skeleton and uploads them to the GPU. Returns false if the bone
+/// index is out of range or there's no active renderer.
+bool rotateBone({required BigInt boneIndex, required double angleDegrees}) =>
+    RustLib.instance.api.crateApiSimpleRotateBone(
+      boneIndex: boneIndex,
+      angleDegrees: angleDegrees,
+    );
+
+/// Drags a joint: rotates the joint's PARENT in 3D, around the parent's
+/// own position, so the dragged joint swings onto the cursor at screen
+/// pixel (x, y). The cursor is projected onto a plane through the joint
+/// that faces the camera, so the joint can move in any direction the
+/// camera sees (orbit the camera to bend front/back). Returns false for
+/// root joints, bad indices, or when there's no active renderer.
+bool dragBone({
+  required BigInt boneIndex,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiSimpleDragBone(
+  boneIndex: boneIndex,
+  x: x,
+  y: y,
+);
+
+/// IK drag: moves the joint onto the cursor at screen pixel (x, y) by
+/// bending the two joints above it (drag an ankle and the hip and knee
+/// follow). The cursor is projected onto a plane through the joint that
+/// faces the camera. Returns false if the joint lacks a parent and
+/// grandparent, or there's no active renderer.
+bool dragLimb({
+  required BigInt boneIndex,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiSimpleDragLimb(
+  boneIndex: boneIndex,
+  x: x,
+  y: y,
+);
+
+/// Puts every joint back to its rest pose, keeping the skeleton and
+/// skin weights as they are.
+void resetPose() => RustLib.instance.api.crateApiSimpleResetPose();
+
+/// Screen-space (pixel) position of every joint in its current posed
+/// state, indexed the same as the skeleton's bones. An entry is None if
+/// that joint is behind the camera.
+List<(double, double)?> jointScreenPositions() =>
+    RustLib.instance.api.crateApiSimpleJointScreenPositions();
+
+List<BigInt?> boneParents() => RustLib.instance.api.crateApiSimpleBoneParents();
+
+/// Clears the current skeleton and any computed weights, so you can
+/// start placing bones over from a clean state.
+void resetSkeleton() => RustLib.instance.api.crateApiSimpleResetSkeleton();
+
+/// Orbits the camera by the given angle deltas (radians) around its
+/// current target. Positive delta_yaw orbits rightward, positive
+/// delta_pitch orbits upward.
+void orbitCamera({required double deltaYaw, required double deltaPitch}) =>
+    RustLib.instance.api.crateApiSimpleOrbitCamera(
+      deltaYaw: deltaYaw,
+      deltaPitch: deltaPitch,
+    );
+
 bool setVertexWeight({
   required BigInt vertexIndex,
   required BigInt boneIndex,

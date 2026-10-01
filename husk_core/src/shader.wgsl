@@ -10,9 +10,14 @@ struct SceneUniform {
 @group(0) @binding(0)
 var<uniform> scene: SceneUniform;
 
+@group(1) @binding(0)
+var<storage, read> bone_matrices: array<mat4x4<f32>>;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) joint_indices: vec4<u32>,
+    @location(3) weights: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -23,10 +28,21 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = scene.view_proj * vec4<f32>(in.position, 1.0);
-    out.world_normal = (scene.model * vec4<f32>(in.normal, 0.0)).xyz;
+
+    let skin_matrix =
+        bone_matrices[in.joint_indices.x] * in.weights.x +
+        bone_matrices[in.joint_indices.y] * in.weights.y +
+        bone_matrices[in.joint_indices.z] * in.weights.z +
+        bone_matrices[in.joint_indices.w] * in.weights.w;
+
+    let skinned_position = skin_matrix * vec4<f32>(in.position, 1.0);
+    let skinned_normal = skin_matrix * vec4<f32>(in.normal, 0.0);
+
+    out.clip_position = scene.view_proj * skinned_position;
+    out.world_normal = (scene.model * skinned_normal).xyz;
     return out;
 }
+
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {

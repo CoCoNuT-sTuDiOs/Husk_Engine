@@ -14,6 +14,13 @@ pub(crate) fn with_active_renderer<R>(f: impl FnOnce(&Renderer) -> R) -> Option<
     })
 }
 
+pub(crate) fn with_active_renderer_mut<R>(f: impl FnOnce(&mut Renderer) -> R) -> Option<R> {
+    let guard = ACTIVE_RENDERER.lock().unwrap();
+    guard.map(|ptr| {
+        let renderer = unsafe { &mut *(ptr as *mut Renderer) };
+        f(renderer)
+    })
+}
 /// Creates a renderer of the given size and returns an opaque handle.
 /// The caller (C++) owns this handle and must pass it to
 /// `husk_renderer_destroy` when done.
@@ -28,15 +35,38 @@ pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer
     const MAX_DESKTOP_TRIANGLES: usize = 500_000;
 
 
-    let mesh = crate::asset_import::load_gltf(
-        "C:\\Users\\HomePC\\Downloads\\anime-girl-casual-outfit-stylized-3d-character\\source\\one_one.glb",
-        MAX_DESKTOP_TRIANGLES,
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("Husk: failed to load test mesh ({e}), rendering empty scene");
-        crate::asset_import::MeshData::default()
-    });
+    // TEMPORARY: a rigged test model from the crate's test assets. If it
+    // loads, its skeleton and skin weights come with it. If not (missing
+    // file, no rig), the old hardcoded plain mesh loads instead.
+    const RIGGED_TEST_MODEL: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/CesiumMan.glb");
+
+    let (mesh, rig) =
+        match crate::rig_import::load_gltf_rig(RIGGED_TEST_MODEL, MAX_DESKTOP_TRIANGLES) {
+            Ok(model) => (model.mesh, Some((model.skeleton, model.vertex_weights))),
+            Err(e) => {
+                eprintln!("Husk: rigged test model not loaded ({e}), trying the plain mesh");
+                let mesh = crate::asset_import::load_gltf(
+                    "C:\\Users\\HomePC\\Downloads\\anime-girl-casual-outfit-stylized-3d-character\\source\\one_one.glb",
+                    MAX_DESKTOP_TRIANGLES,
+                )
+                .unwrap_or_else(|e| {
+                    eprintln!("Husk: failed to load test mesh ({e}), rendering empty scene");
+                    crate::asset_import::MeshData::default()
+                });
+                (mesh, None)
+            }
+        };
     let renderer = Box::new(Renderer::new(width, height, mesh));
+
+    // Hand the imported rig to the renderer and to the shared scene state,
+    // so the overlay, dragging and posing tools all see it.
+    if let Some((skeleton, vertex_weights)) = rig {
+        renderer.update_vertex_weights(&vertex_weights);
+        *crate::scene_state::POSE.lock().unwrap() = crate::pose::Pose::rest_for(&skeleton);
+        *crate::scene_state::SKELETON.lock().unwrap() = skeleton;
+        *crate::scene_state::WEIGHTS.lock().unwrap() = Some(vertex_weights);
+    }
     let raw = Box::into_raw(renderer);
 
     *ACTIVE_RENDERER.lock().unwrap() = Some(raw as usize);
