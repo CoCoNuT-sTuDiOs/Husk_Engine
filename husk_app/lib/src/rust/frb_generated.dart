@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1453464902;
+  int get rustContentHash => -1139645612;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -135,6 +135,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt vertexIndex,
     required BigInt boneIndex,
   });
+
+  (bool, BigInt?) crateApiSimpleUndoLastBone();
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -564,6 +566,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: ["vertexIndex", "boneIndex"],
       );
 
+  @override
+  (bool, BigInt?) crateApiSimpleUndoLastBone() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_record_bool_opt_box_autoadd_usize,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleUndoLastBoneConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleUndoLastBoneConstMeta =>
+      const TaskConstMeta(debugName: "undo_last_bone", argNames: []);
+
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -680,6 +704,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BigInt? dco_decode_opt_box_autoadd_usize(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_usize(raw);
+  }
+
+  @protected
+  (bool, BigInt?) dco_decode_record_bool_opt_box_autoadd_usize(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (dco_decode_bool(arr[0]), dco_decode_opt_box_autoadd_usize(arr[1]));
   }
 
   @protected
@@ -915,6 +949,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  (bool, BigInt?) sse_decode_record_bool_opt_box_autoadd_usize(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field0 = sse_decode_bool(deserializer);
+    var var_field1 = sse_decode_opt_box_autoadd_usize(deserializer);
+    return (var_field0, var_field1);
+  }
+
+  @protected
   (double, double) sse_decode_record_f_32_f_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_field0 = sse_decode_f_32(deserializer);
@@ -1139,6 +1183,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_box_autoadd_usize(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_record_bool_opt_box_autoadd_usize(
+    (bool, BigInt?) self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.$1, serializer);
+    sse_encode_opt_box_autoadd_usize(self.$2, serializer);
   }
 
   @protected

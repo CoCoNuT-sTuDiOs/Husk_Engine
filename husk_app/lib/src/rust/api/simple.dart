@@ -89,6 +89,13 @@ bool dragLimb({
 /// skin weights as they are.
 void resetPose() => RustLib.instance.api.crateApiSimpleResetPose();
 
+/// Undo for bone placement: removes the most recently placed bone and
+/// returns (true, its parent) so the caller can select that parent, or
+/// (false, None) if there is nothing to remove. Skin weights computed
+/// earlier still refer to the old bone list, so recompute them afterward.
+(bool, BigInt?) undoLastBone() =>
+    RustLib.instance.api.crateApiSimpleUndoLastBone();
+
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.

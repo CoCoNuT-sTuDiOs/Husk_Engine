@@ -220,6 +220,25 @@ pub fn reset_pose() {
     crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
 }
 
+/// Undo for bone placement: removes the most recently placed bone and
+/// returns (true, its parent) so the caller can select that parent, or
+/// (false, None) if there is nothing to remove. Skin weights computed
+/// earlier still refer to the old bone list, so recompute them afterward.
+#[flutter_rust_bridge::frb(sync)]
+pub fn undo_last_bone() -> (bool, Option<usize>) {
+    let (skin_matrices, parent) = {
+        let mut skeleton = crate::scene_state::SKELETON.lock().unwrap();
+        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let Some(removed) = skeleton.bones.pop() else {
+            return (false, None);
+        };
+        pose.rotations.truncate(skeleton.bones.len());
+        (pose.skinning_matrices(&skeleton), removed.parent)
+    };
+    crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
+    (true, parent)
+}
+
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.

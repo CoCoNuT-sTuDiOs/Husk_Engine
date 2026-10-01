@@ -50,6 +50,7 @@ class _HuskTextureViewState extends State<HuskTextureView> {
   void initState() {
     super.initState();
     _loadTextureId();
+    HardwareKeyboard.instance.addHandler(_handleKey);    
     _overlayTimer = Timer.periodic(
       const Duration(milliseconds: 33),
       (_) => _overlayTick.value++,
@@ -58,6 +59,7 @@ class _HuskTextureViewState extends State<HuskTextureView> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKey);
     _overlayTimer?.cancel();
     _overlayTick.dispose();
     super.dispose();
@@ -140,6 +142,30 @@ class _HuskTextureViewState extends State<HuskTextureView> {
     if (_lastBoneIndex != null) {
       rotateBone(boneIndex: BigInt.zero, angleDegrees: value);
     }
+  }
+
+  bool _handleKey(KeyEvent event) {
+    if ((event is KeyDownEvent || event is KeyRepeatEvent) &&
+        event.logicalKey == LogicalKeyboardKey.keyZ &&
+        HardwareKeyboard.instance.isControlPressed) {
+      _handleUndo();
+      return true;
+    }
+    return false;
+  }
+
+  void _handleUndo() {
+    final (removed, parent) = undoLastBone();
+    if (!removed) {
+      debugPrint('Nothing to undo');
+      return;
+    }
+    setState(() {
+      _lastBoneIndex = parent;
+    });
+    debugPrint(
+      'Undid the last bone; selected joint: $parent, total bones: ${boneCount()}',
+    );
   }
 
   void _handlePanStart(DragStartDetails details, double scale) {

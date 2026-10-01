@@ -80,6 +80,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? dco_decode_opt_box_autoadd_usize(dynamic raw);
 
   @protected
+  (bool, BigInt?) dco_decode_record_bool_opt_box_autoadd_usize(dynamic raw);
+
+  @protected
   (double, double) dco_decode_record_f_32_f_32(dynamic raw);
 
   @protected
@@ -174,6 +177,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt? sse_decode_opt_box_autoadd_usize(SseDeserializer deserializer);
+
+  @protected
+  (bool, BigInt?) sse_decode_record_bool_opt_box_autoadd_usize(
+    SseDeserializer deserializer,
+  );
 
   @protected
   (double, double) sse_decode_record_f_32_f_32(SseDeserializer deserializer);
@@ -286,6 +294,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_usize(BigInt? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_record_bool_opt_box_autoadd_usize(
+    (bool, BigInt?) self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_record_f_32_f_32(

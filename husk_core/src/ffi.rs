@@ -39,15 +39,14 @@ pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer
     // loads, its skeleton and skin weights come with it. If not (missing
     // file, no rig), the old hardcoded plain mesh loads instead.
     const RIGGED_TEST_MODEL: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/CesiumMan.glb");
-
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/off.glb");
     let (mesh, rig) =
         match crate::rig_import::load_gltf_rig(RIGGED_TEST_MODEL, MAX_DESKTOP_TRIANGLES) {
             Ok(model) => (model.mesh, Some((model.skeleton, model.vertex_weights))),
             Err(e) => {
                 eprintln!("Husk: rigged test model not loaded ({e}), trying the plain mesh");
                 let mesh = crate::asset_import::load_gltf(
-                    "C:\\Users\\HomePC\\Downloads\\anime-girl-casual-outfit-stylized-3d-character\\source\\one_one.glb",
+                "C:\\Users\\HomePC\\Downloads\\lady_noire\\scene.gltf",
                     MAX_DESKTOP_TRIANGLES,
                 )
                 .unwrap_or_else(|e| {
