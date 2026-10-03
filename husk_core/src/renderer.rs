@@ -357,8 +357,15 @@ impl Renderer {
         self.orbit_yaw += delta_yaw;
         self.orbit_pitch = (self.orbit_pitch + delta_pitch).clamp(-1.5, 1.5);
     }
+
+    /// Moves the camera closer (a factor below 1) or farther away (above 1),
+    /// within sensible limits.
+    pub fn zoom(&mut self, factor: f32) {
+        self.orbit_distance = (self.orbit_distance * factor).clamp(0.3, 500.0);
+    }
+
     pub fn render_frame(&mut self) {
-        let view = self
+    let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -383,7 +390,14 @@ impl Renderer {
         let scene_uniform = SceneUniform {
             view_proj: view_proj.to_cols_array_2d(),
             model: model.to_cols_array_2d(),
-            light_dir: [-0.4, -1.0, -0.3, 0.0],
+            light_dir: {
+                // A light that travels with the camera: it shines from the
+                // viewer's side, a little from above and from the left, so
+                // whatever faces the camera is lit however you orbit.
+                let shine = ((target - eye).normalize() + glam::Vec3::new(0.3, -0.5, 0.0))
+                    .normalize();
+                [shine.x, shine.y, shine.z, 0.0]
+            },
             light_color: [1.0, 1.0, 1.0, 1.0],
             base_color: [0.976, 0.451, 0.086, 1.0],
             material: [0.4, 0.2, 0.0, 0.0],
@@ -552,6 +566,14 @@ impl Renderer {
             (ndc_x * 0.5 + 0.5) * self.width as f32,
             (0.5 - ndc_y * 0.5) * self.height as f32,
         ))
+    }
+
+    /// The camera's right-hand direction on screen, as of the last rendered frame.
+    pub fn view_right(&self) -> glam::Vec3 {
+        let inverse = self.last_view_proj.inverse();
+        let middle = inverse.project_point3(glam::Vec3::new(0.0, 0.0, 0.5));
+        let right = inverse.project_point3(glam::Vec3::new(1.0, 0.0, 0.5));
+        (right - middle).normalize()
     }
 
     /// The direction the camera is looking, as of the last rendered frame.

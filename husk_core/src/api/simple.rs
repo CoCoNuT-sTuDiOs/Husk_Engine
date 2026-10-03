@@ -239,6 +239,144 @@ pub fn undo_last_bone() -> (bool, Option<usize>) {
     (true, parent)
 }
 
+/// Records the current pose as a keyframe at `time` (seconds). A key
+/// already at that time is replaced. Returns how many keys there are now.
+#[flutter_rust_bridge::frb(sync)]
+pub fn add_keyframe(time: f32) -> usize {
+    let skeleton = crate::scene_state::SKELETON.lock().unwrap();
+    let mut pose = crate::scene_state::POSE.lock().unwrap();
+    pose.ensure_covers(&skeleton);
+    let rotations: Vec<glam::Quat> = pose
+        .rotations
+        .iter()
+        .take(skeleton.bones.len())
+        .copied()
+        .collect();
+    let mut timeline = crate::scene_state::TIMELINE.lock().unwrap();
+    timeline.set_key_with_offset(time, rotations, pose.root_offset);
+    timeline.keys.len()
+}
+
+/// The time (seconds) of every keyframe, earliest first.
+#[flutter_rust_bridge::frb(sync)]
+pub fn keyframe_times() -> Vec<f32> {
+    crate::scene_state::TIMELINE
+        .lock()
+        .unwrap()
+        .keys
+        .iter()
+        .map(|key| key.time)
+        .collect()
+}
+
+/// Deletes the keyframe nearest `time` if one is within 0.05 s of it.
+/// Returns whether a key was removed.
+#[flutter_rust_bridge::frb(sync)]
+pub fn delete_keyframe_at(time: f32) -> bool {
+    crate::scene_state::TIMELINE
+        .lock()
+        .unwrap()
+        .remove_near(time, 0.05)
+}
+
+/// Poses the character as the keyframes say it looks at `time` (seconds).
+/// Returns false, leaving the pose alone, if there are no keyframes.
+#[flutter_rust_bridge::frb(sync)]
+pub fn seek_to_time(time: f32) -> bool {
+    let skin_matrices = {
+        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
+        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let timeline = crate::scene_state::TIMELINE.lock().unwrap();
+        let Some(rotations) = timeline.sample(time, skeleton.bones.len()) else {
+            return false;
+        };
+        pose.rotations = rotations;
+        pose.root_offset = timeline.sample_offset(time).unwrap_or(glam::Vec3::ZERO);
+        pose.skinning_matrices(&skeleton)
+    };
+    crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
+    true
+}
+
+/// Makes the keys repeat: a cycle runs from the first key until
+/// `end_time` (seconds), then starts over, over and over. `end_time` has
+/// to be past the last key. Returns whether the repeat was set.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_repeat_end(end_time: f32) -> bool {
+    crate::scene_state::TIMELINE
+        .lock()
+        .unwrap()
+        .set_cycle_end(end_time)
+}
+
+/// Stops the keys from repeating.
+#[flutter_rust_bridge::frb(sync)]
+pub fn clear_repeat() {
+    crate::scene_state::TIMELINE.lock().unwrap().cycle_period = None;
+}
+
+/// How long one repeat of the keys lasts (seconds), or None if they don't repeat.
+#[flutter_rust_bridge::frb(sync)]
+pub fn repeat_period() -> Option<f32> {
+    crate::scene_state::TIMELINE
+        .lock()
+        .unwrap()
+        .effective_period()
+}
+
+/// Moves the whole character so its root joint follows the cursor at
+/// screen pixel (x, y), on a plane through the root that faces the camera.
+/// Returns false if there is no skeleton or no active renderer.
+#[flutter_rust_bridge::frb(sync)]
+pub fn move_character(x: f64, y: f64) -> bool {
+    let (root_position, rest_position) = {
+        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
+        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        pose.ensure_covers(&skeleton);
+        let Some(root_index) = skeleton.bones.iter().position(|bone| bone.parent.is_none())
+        else {
+            return false;
+        };
+        let rest = skeleton.world_bind_matrices()[root_index].transform_point3(glam::Vec3::ZERO);
+        (rest + pose.root_offset, rest)
+    };
+
+    let Some(target) = crate::ffi::with_active_renderer(|renderer| {
+        renderer.screen_to_view_plane(x as f32, y as f32, root_position)
+    })
+    .flatten() else {
+        return false;
+    };
+
+    let skin_matrices = {
+        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
+        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        pose.root_offset = target - rest_position;
+        pose.skinning_matrices(&skeleton)
+    };
+    crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
+    true
+}
+
+/// Zooms the camera: a factor above 1 moves it away, below 1 closer.
+#[flutter_rust_bridge::frb(sync)]
+pub fn zoom_camera(factor: f64) {
+    crate::ffi::with_active_renderer_mut(|renderer| renderer.zoom(factor as f32));
+}
+
+/// Makes the character travel at `speed` units per second along the
+/// camera's right-hand direction as it looks right now (negative goes
+/// left), starting at the first key. Combines with keyed movement and
+/// repeats. Returns false if there is no active renderer.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_travel_speed(speed: f32) -> bool {
+    let Some(right) = crate::ffi::with_active_renderer(|renderer| renderer.view_right()) else {
+        return false;
+    };
+    crate::scene_state::TIMELINE.lock().unwrap().travel_velocity = right * speed;
+    true
+}
+
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.
@@ -279,6 +417,7 @@ pub fn reset_skeleton() {
     *crate::scene_state::SKELETON.lock().unwrap() = crate::rig::Skeleton::default();
     *crate::scene_state::WEIGHTS.lock().unwrap() = None;
     *crate::scene_state::POSE.lock().unwrap() = crate::pose::Pose::default();
+    *crate::scene_state::TIMELINE.lock().unwrap() = crate::keyframes::Timeline::default();
     // Also put the GPU's bone matrices back to identity so the mesh
     // returns to its rest look instead of staying visibly posed.
     crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));

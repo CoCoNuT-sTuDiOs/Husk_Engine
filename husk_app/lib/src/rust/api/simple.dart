@@ -96,6 +96,54 @@ void resetPose() => RustLib.instance.api.crateApiSimpleResetPose();
 (bool, BigInt?) undoLastBone() =>
     RustLib.instance.api.crateApiSimpleUndoLastBone();
 
+/// Records the current pose as a keyframe at `time` (seconds). A key
+/// already at that time is replaced. Returns how many keys there are now.
+BigInt addKeyframe({required double time}) =>
+    RustLib.instance.api.crateApiSimpleAddKeyframe(time: time);
+
+/// The time (seconds) of every keyframe, earliest first.
+Float32List keyframeTimes() =>
+    RustLib.instance.api.crateApiSimpleKeyframeTimes();
+
+/// Deletes the keyframe nearest `time` if one is within 0.05 s of it.
+/// Returns whether a key was removed.
+bool deleteKeyframeAt({required double time}) =>
+    RustLib.instance.api.crateApiSimpleDeleteKeyframeAt(time: time);
+
+/// Poses the character as the keyframes say it looks at `time` (seconds).
+/// Returns false, leaving the pose alone, if there are no keyframes.
+bool seekToTime({required double time}) =>
+    RustLib.instance.api.crateApiSimpleSeekToTime(time: time);
+
+/// Makes the keys repeat: a cycle runs from the first key until
+/// `end_time` (seconds), then starts over, over and over. `end_time` has
+/// to be past the last key. Returns whether the repeat was set.
+bool setRepeatEnd({required double endTime}) =>
+    RustLib.instance.api.crateApiSimpleSetRepeatEnd(endTime: endTime);
+
+/// Stops the keys from repeating.
+void clearRepeat() => RustLib.instance.api.crateApiSimpleClearRepeat();
+
+/// How long one repeat of the keys lasts (seconds), or None if they don't repeat.
+double? repeatPeriod() => RustLib.instance.api.crateApiSimpleRepeatPeriod();
+
+/// Moves the whole character so its root joint follows the cursor at
+/// screen pixel (x, y), on a plane through the root that faces the camera.
+/// Returns false if there is no skeleton or no active renderer.
+bool moveCharacter({required double x, required double y}) =>
+    RustLib.instance.api.crateApiSimpleMoveCharacter(x: x, y: y);
+
+/// Zooms the camera: a factor above 1 moves it away, below 1 closer.
+void zoomCamera({required double factor}) =>
+    RustLib.instance.api.crateApiSimpleZoomCamera(factor: factor);
+
+/// Makes the character travel at `speed` units per second along the
+/// camera's right-hand direction as it looks right now (negative goes
+/// left), starting at the first key. Combines with keyed movement and
+/// repeats. Returns false if there is no active renderer.
+bool setTravelSpeed({required double speed}) =>
+    RustLib.instance.api.crateApiSimpleSetTravelSpeed(speed: speed);
+
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.

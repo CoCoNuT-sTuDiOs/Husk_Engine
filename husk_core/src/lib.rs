@@ -12,3 +12,4 @@ pub mod pose;
 pub mod voxel;
 pub mod geodesic;
 pub mod rig_import;
+pub mod keyframes;

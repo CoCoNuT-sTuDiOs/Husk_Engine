@@ -3,6 +3,7 @@ use crate::rig::Skeleton;
 #[derive(Debug, Clone, Default)]
 pub struct Pose {
     pub rotations: Vec<glam::Quat>,
+    pub root_offset: glam:: Vec3,
 }
 
 impl Pose {
@@ -10,6 +11,7 @@ impl Pose {
     pub fn rest_for(skeleton: &Skeleton) -> Pose {
         Pose {
             rotations: vec![glam::Quat::IDENTITY; skeleton.bones.len()],
+            root_offset: glam::Vec3::ZERO,
         }
     }
 
@@ -57,7 +59,7 @@ impl Pose {
                     glam::Mat4::from_scale_rotation_translation(
                         bone.local_scale,
                         bone.local_rotation * offset,
-                        bone.local_position,
+                        bone.local_position + self.root_offset,
                     )
                 }
             };
@@ -393,3 +395,50 @@ mod tests {
         assert!(!pose.solve_two_bone_ik(&skeleton, 99, target, glam::Vec3::Z));
     }
     }
+
+    #[cfg(test)]
+mod root_tests {
+    use super::*;
+
+    fn distance(a: glam::Vec3, b: glam::Vec3) -> f32 {
+        (a - b).length()
+    }
+
+    /// A root at the origin with one joint a unit away along +X.
+    fn short_arm() -> Skeleton {
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, glam::Vec3::ZERO);
+        skeleton.add_bone("hand", Some(root), glam::Vec3::new(1.0, 0.0, 0.0));
+        skeleton
+    }
+
+    #[test]
+    fn the_root_offset_moves_the_whole_character() {
+        let skeleton = short_arm();
+        let rest = Pose::rest_for(&skeleton);
+        let mut pose = Pose::rest_for(&skeleton);
+        pose.root_offset = glam::Vec3::new(2.0, 0.0, -1.0);
+
+        let before = rest.posed_joint_positions(&skeleton);
+        let after = pose.posed_joint_positions(&skeleton);
+        for (b, a) in before.iter().zip(after.iter()) {
+            assert!(distance(*a, *b + glam::Vec3::new(2.0, 0.0, -1.0)) < 1e-5);
+        }
+
+        // The skinning matrices carry the move: a vertex sitting on the hand
+        // at rest ends up on the moved hand.
+        let matrices = pose.skinning_matrices(&skeleton);
+        assert!(distance(matrices[1].transform_point3(before[1]), after[1]) < 1e-5);
+    }
+
+    #[test]
+    fn rotating_the_root_and_moving_it_combine() {
+        let skeleton = short_arm();
+        let mut pose = Pose::rest_for(&skeleton);
+        assert!(pose.set_rotation(0, glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)));
+        pose.root_offset = glam::Vec3::new(1.0, 0.0, 0.0);
+        let p = pose.posed_joint_positions(&skeleton);
+        assert!(distance(p[0], glam::Vec3::new(1.0, 0.0, 0.0)) < 1e-5);
+        assert!(distance(p[1], glam::Vec3::new(1.0, 1.0, 0.0)) < 1e-5);
+    }
+}
