@@ -19,6 +19,7 @@ pub struct Timeline {
     pub keys: Vec<Keyframe>,
     pub cycle_period: Option<f32>,
     pub travel_velocity: glam::Vec3,
+    pub travel_speed: f32,
 }
 
 impl Timeline {

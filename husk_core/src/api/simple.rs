@@ -373,8 +373,99 @@ pub fn set_travel_speed(speed: f32) -> bool {
     let Some(right) = crate::ffi::with_active_renderer(|renderer| renderer.view_right()) else {
         return false;
     };
-    crate::scene_state::TIMELINE.lock().unwrap().travel_velocity = right * speed;
+    let mut timeline = crate::scene_state::TIMELINE.lock().unwrap();
+    timeline.travel_velocity = right * speed;
+    timeline.travel_speed = speed;
     true
+}
+
+/// The Travel slider's current value (units per second).
+#[flutter_rust_bridge::frb(sync)]
+pub fn travel_speed() -> f32 {
+    crate::scene_state::TIMELINE.lock().unwrap().travel_speed
+}
+
+/// Saves the skeleton, skin weights and animation to `path` as a JSON
+/// file. Returns (true, summary) on success or (false, reason) on failure.
+#[flutter_rust_bridge::frb(sync)]
+pub fn save_project(path: String) -> (bool, String) {
+    let vertex_count =
+        crate::ffi::with_active_renderer(|renderer| renderer.mesh_positions().len()).unwrap_or(0);
+    let skeleton = crate::scene_state::SKELETON.lock().unwrap();
+    let weights = crate::scene_state::WEIGHTS.lock().unwrap();
+    let timeline = crate::scene_state::TIMELINE.lock().unwrap();
+    match crate::project::write_project(
+        &path,
+        vertex_count,
+        &skeleton,
+        weights.as_deref(),
+        &timeline,
+    ) {
+        Ok(()) => (
+            true,
+            format!(
+                "Saved {} bones, {} keys and the skin weights to {path}",
+                skeleton.bones.len(),
+                timeline.keys.len()
+            ),
+        ),
+        Err(reason) => (false, reason),
+    }
+}
+
+/// Loads a project saved with `save_project` onto the model that is
+/// currently open, replacing the skeleton, skin weights and animation.
+/// The project must have been saved for a model with the same number of
+/// vertices. Returns (true, summary) or (false, reason).
+#[flutter_rust_bridge::frb(sync)]
+pub fn load_project(path: String) -> (bool, String) {
+    let project = match crate::project::read_project(&path) {
+        Ok(project) => project,
+        Err(reason) => return (false, reason),
+    };
+    let vertex_count =
+        crate::ffi::with_active_renderer(|renderer| renderer.mesh_positions().len()).unwrap_or(0);
+    if project.vertex_count != vertex_count {
+        return (
+            false,
+            format!(
+                "This project was saved for a model with {} vertices, but the open model has {vertex_count}",
+                project.vertex_count
+            ),
+        );
+    }
+
+    // Skin weights go to the GPU; a project saved without any gets the
+    // plain default (everything on bone 0).
+    let gpu_weights: Vec<crate::skinning::VertexWeights> = match &project.weights {
+        Some(weights) => weights.clone(),
+        None => vec![
+            crate::skinning::VertexWeights {
+                joint_indices: [0; 4],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            };
+            vertex_count
+        ],
+    };
+    crate::ffi::with_active_renderer(|renderer| renderer.update_vertex_weights(&gpu_weights));
+
+    let summary = format!(
+        "Loaded {} bones and {} keys from {path}",
+        project.skeleton.bones.len(),
+        project.timeline.keys.len()
+    );
+    {
+        let mut skeleton = crate::scene_state::SKELETON.lock().unwrap();
+        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let mut weights = crate::scene_state::WEIGHTS.lock().unwrap();
+        let mut timeline = crate::scene_state::TIMELINE.lock().unwrap();
+        *pose = crate::pose::Pose::rest_for(&project.skeleton);
+        *skeleton = project.skeleton;
+        *weights = project.weights;
+        *timeline = project.timeline;
+    }
+    crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
+    (true, summary)
 }
 
 /// Screen-space (pixel) position of every joint in its current posed

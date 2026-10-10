@@ -6,6 +6,9 @@ import 'package:husk_app/src/rust/frb_generated.dart';
 
 const MethodChannel _huskChannel = MethodChannel('husk/texture');
 
+// TEMPORARY: one fixed project file, like the hardcoded model path. A file
+// picker comes later. Change this if your Documents folder lives elsewhere.
+const String _projectPath = r'C:\Users\HomePC\Documents\husk_project.json';
 Future<void> main() async {
   await RustLib.init();
   runApp(const MyApp());
@@ -166,6 +169,36 @@ class _HuskTextureViewState extends State<HuskTextureView> {
     }
   }
 
+  void _showMessage(String message) {
+    debugPrint(message);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
+    );
+  }
+
+  void _saveProject() {
+    final (_, message) = saveProject(path: _projectPath);
+    _showMessage(message);
+  }
+
+  void _loadProject() {
+    if (_playing) _togglePlay();
+    final (ok, message) = loadProject(path: _projectPath);
+    if (ok) {
+      setState(() {
+        _refreshKeys();
+        _time = 0.0;
+        _lastBoneIndex = null;
+        _placeBones = false;
+        _travelSpeed = travelSpeed();
+      });
+      seekToTime(time: 0.0);
+    }
+    _showMessage(message);
+  }
+
   void _refreshKeys() {
     _keyTimes = List<double>.of(keyframeTimes());
     _repeatPeriod = repeatPeriod();
@@ -314,6 +347,8 @@ class _HuskTextureViewState extends State<HuskTextureView> {
             ],
           ),
         ),
+        ElevatedButton(onPressed: _saveProject, child: const Text('Save')),
+        ElevatedButton(onPressed: _loadProject, child: const Text('Load')),
         const Text('Green dot = root: drag it to move the character'),
       ],
     );

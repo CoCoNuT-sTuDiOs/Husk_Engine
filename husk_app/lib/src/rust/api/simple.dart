@@ -144,6 +144,21 @@ void zoomCamera({required double factor}) =>
 bool setTravelSpeed({required double speed}) =>
     RustLib.instance.api.crateApiSimpleSetTravelSpeed(speed: speed);
 
+/// The Travel slider's current value (units per second).
+double travelSpeed() => RustLib.instance.api.crateApiSimpleTravelSpeed();
+
+/// Saves the skeleton, skin weights and animation to `path` as a JSON
+/// file. Returns (true, summary) on success or (false, reason) on failure.
+(bool, String) saveProject({required String path}) =>
+    RustLib.instance.api.crateApiSimpleSaveProject(path: path);
+
+/// Loads a project saved with `save_project` onto the model that is
+/// currently open, replacing the skeleton, skin weights and animation.
+/// The project must have been saved for a model with the same number of
+/// vertices. Returns (true, summary) or (false, reason).
+(bool, String) loadProject({required String path}) =>
+    RustLib.instance.api.crateApiSimpleLoadProject(path: path);
+
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.

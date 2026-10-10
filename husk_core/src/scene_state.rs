@@ -11,4 +11,5 @@ pub static TIMELINE: Mutex<crate::keyframes::Timeline> =
         keys: Vec::new(),
         cycle_period: None,
         travel_velocity: glam::Vec3::ZERO,
+        travel_speed: 0.0,
     });
