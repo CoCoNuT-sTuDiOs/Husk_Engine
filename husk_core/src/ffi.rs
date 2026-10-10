@@ -62,9 +62,11 @@ pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer
     // so the overlay, dragging and posing tools all see it.
     if let Some((skeleton, vertex_weights)) = rig {
         renderer.update_vertex_weights(&vertex_weights);
-        *crate::scene_state::POSE.lock().unwrap() = crate::pose::Pose::rest_for(&skeleton);
-        *crate::scene_state::SKELETON.lock().unwrap() = skeleton;
-        *crate::scene_state::WEIGHTS.lock().unwrap() = Some(vertex_weights);
+        let mut active = crate::scene_state::active_object();
+        active.pose = crate::pose::Pose::rest_for(&skeleton);
+        active.skeleton = skeleton;
+        active.weights = Some(vertex_weights);
+
     }
     let raw = Box::into_raw(renderer);
 

@@ -27,10 +27,11 @@ pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, 
     })
     .flatten()?;
 
-    let mut skeleton = crate::scene_state::SKELETON.lock().unwrap();
+    let mut active = crate::scene_state::active_object();
+    let skeleton = &mut active.skeleton;
 
     let local_position = match parent {
-        Some(parent_index) => {
+    Some(parent_index) => {
             let world_matrices = skeleton.world_bind_matrices();
             let parent_world = world_matrices[parent_index].transform_point3(glam::Vec3::ZERO);
             hit - parent_world
@@ -47,7 +48,7 @@ pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, 
 /// Returns the number of bones placed so far in the current skeleton.
 #[flutter_rust_bridge::frb(sync)]
 pub fn bone_count() -> usize {
-    crate::scene_state::SKELETON.lock().unwrap().bones.len()
+    crate::scene_state::active_object().skeleton.bones.len()
 }
 
 /// Runs auto skin-weighting (Section 3c's naive distance-based scheme)
@@ -57,9 +58,10 @@ pub fn bone_count() -> usize {
 #[flutter_rust_bridge::frb(sync)]
 pub fn compute_weights() -> bool {
     let computed = crate::ffi::with_active_renderer(|renderer| {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
+        let active = crate::scene_state::active_object();
+        let skeleton = &active.skeleton;
         if skeleton.bones.is_empty() {
-            return None;
+        return None;
         }
         let world_matrices = skeleton.world_bind_matrices();
         let geodesic = crate::geodesic::compute_geodesic_weights(
@@ -82,7 +84,7 @@ pub fn compute_weights() -> bool {
     match computed {
         Some(weights) => {
             crate::ffi::with_active_renderer(|renderer| renderer.update_vertex_weights(&weights));
-            *crate::scene_state::WEIGHTS.lock().unwrap() = Some(weights);
+            crate::scene_state::active_object().weights = Some(weights);
             true
         }
         None => false,
@@ -93,8 +95,8 @@ pub fn compute_weights() -> bool {
 /// weights have been computed yet.
 #[flutter_rust_bridge::frb(sync)]
 pub fn get_vertex_dominant_bone(vertex_index: usize) -> Option<(usize, f32)> {
-    let weights_guard = crate::scene_state::WEIGHTS.lock().unwrap();
-    let weights = weights_guard.as_ref()?;
+    let active = crate::scene_state::active_object();
+    let weights = active.weights.as_ref()?;
     let vertex_weights = weights.get(vertex_index)?;
     Some((
         vertex_weights.joint_indices[0] as usize,
@@ -111,9 +113,8 @@ pub fn get_vertex_dominant_bone(vertex_index: usize) -> Option<(usize, f32)> {
 #[flutter_rust_bridge::frb(sync)]
 pub fn rotate_bone(bone_index: usize, angle_degrees: f32) -> bool {
     let skin_matrices = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
-
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
         if bone_index >= skeleton.bones.len() {
             return false;
         }
@@ -142,9 +143,9 @@ pub fn rotate_bone(bone_index: usize, angle_degrees: f32) -> bool {
 #[flutter_rust_bridge::frb(sync)]
 pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
     let joint_position = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
-        pose.ensure_covers(&skeleton);
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
+      pose.ensure_covers(&skeleton);
         match pose.posed_joint_positions(&skeleton).get(bone_index) {
             Some(position) => *position,
             None => return false,
@@ -159,10 +160,10 @@ pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
     };
 
     let skin_matrices = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
         if !pose.aim_joint_at(&skeleton, bone_index, target) {
-            return false;
+        return false;
         }
         pose.skinning_matrices(&skeleton)
     };
@@ -180,9 +181,9 @@ pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
 #[flutter_rust_bridge::frb(sync)]
 pub fn drag_limb(bone_index: usize, x: f64, y: f64) -> bool {
     let joint_position = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
-        pose.ensure_covers(&skeleton);
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
+pose.ensure_covers(&skeleton);
         match pose.posed_joint_positions(&skeleton).get(bone_index) {
             Some(position) => *position,
             None => return false,
@@ -199,10 +200,10 @@ pub fn drag_limb(bone_index: usize, x: f64, y: f64) -> bool {
     };
 
     let skin_matrices = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
         if !pose.solve_two_bone_ik(&skeleton, bone_index, target, toward_viewer) {
-            return false;
+        return false;
         }
         pose.skinning_matrices(&skeleton)
     };
@@ -215,8 +216,9 @@ pub fn drag_limb(bone_index: usize, x: f64, y: f64) -> bool {
 /// skin weights as they are.
 #[flutter_rust_bridge::frb(sync)]
 pub fn reset_pose() {
-    let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-    *crate::scene_state::POSE.lock().unwrap() = crate::pose::Pose::rest_for(&skeleton);
+    let mut active = crate::scene_state::active_object();
+    let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
+    *pose = crate::pose::Pose::rest_for(&skeleton);
     crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
 }
 
@@ -227,10 +229,10 @@ pub fn reset_pose() {
 #[flutter_rust_bridge::frb(sync)]
 pub fn undo_last_bone() -> (bool, Option<usize>) {
     let (skin_matrices, parent) = {
-        let mut skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
         let Some(removed) = skeleton.bones.pop() else {
-            return (false, None);
+        return (false, None);
         };
         pose.rotations.truncate(skeleton.bones.len());
         (pose.skinning_matrices(&skeleton), removed.parent)
@@ -243,8 +245,8 @@ pub fn undo_last_bone() -> (bool, Option<usize>) {
 /// already at that time is replaced. Returns how many keys there are now.
 #[flutter_rust_bridge::frb(sync)]
 pub fn add_keyframe(time: f32) -> usize {
-    let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-    let mut pose = crate::scene_state::POSE.lock().unwrap();
+    let mut active = crate::scene_state::active_object();
+    let crate::scene_state::Object { skeleton, pose, timeline, .. } = &mut *active;
     pose.ensure_covers(&skeleton);
     let rotations: Vec<glam::Quat> = pose
         .rotations
@@ -252,17 +254,15 @@ pub fn add_keyframe(time: f32) -> usize {
         .take(skeleton.bones.len())
         .copied()
         .collect();
-    let mut timeline = crate::scene_state::TIMELINE.lock().unwrap();
     timeline.set_key_with_offset(time, rotations, pose.root_offset);
-    timeline.keys.len()
+        timeline.keys.len()
 }
 
 /// The time (seconds) of every keyframe, earliest first.
 #[flutter_rust_bridge::frb(sync)]
 pub fn keyframe_times() -> Vec<f32> {
-    crate::scene_state::TIMELINE
-        .lock()
-        .unwrap()
+    crate::scene_state::active_object()
+        .timeline
         .keys
         .iter()
         .map(|key| key.time)
@@ -273,9 +273,8 @@ pub fn keyframe_times() -> Vec<f32> {
 /// Returns whether a key was removed.
 #[flutter_rust_bridge::frb(sync)]
 pub fn delete_keyframe_at(time: f32) -> bool {
-    crate::scene_state::TIMELINE
-        .lock()
-        .unwrap()
+    crate::scene_state::active_object()
+        .timeline
         .remove_near(time, 0.05)
 }
 
@@ -284,9 +283,8 @@ pub fn delete_keyframe_at(time: f32) -> bool {
 #[flutter_rust_bridge::frb(sync)]
 pub fn seek_to_time(time: f32) -> bool {
     let skin_matrices = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
-        let timeline = crate::scene_state::TIMELINE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, timeline, .. } = &mut *active;
         let Some(rotations) = timeline.sample(time, skeleton.bones.len()) else {
             return false;
         };
@@ -303,24 +301,22 @@ pub fn seek_to_time(time: f32) -> bool {
 /// to be past the last key. Returns whether the repeat was set.
 #[flutter_rust_bridge::frb(sync)]
 pub fn set_repeat_end(end_time: f32) -> bool {
-    crate::scene_state::TIMELINE
-        .lock()
-        .unwrap()
+    crate::scene_state::active_object()
+        .timeline
         .set_cycle_end(end_time)
 }
 
 /// Stops the keys from repeating.
 #[flutter_rust_bridge::frb(sync)]
 pub fn clear_repeat() {
-    crate::scene_state::TIMELINE.lock().unwrap().cycle_period = None;
+    crate::scene_state::active_object().timeline.cycle_period = None;
 }
 
 /// How long one repeat of the keys lasts (seconds), or None if they don't repeat.
 #[flutter_rust_bridge::frb(sync)]
 pub fn repeat_period() -> Option<f32> {
-    crate::scene_state::TIMELINE
-        .lock()
-        .unwrap()
+    crate::scene_state::active_object()
+        .timeline
         .effective_period()
 }
 
@@ -330,8 +326,8 @@ pub fn repeat_period() -> Option<f32> {
 #[flutter_rust_bridge::frb(sync)]
 pub fn move_character(x: f64, y: f64) -> bool {
     let (root_position, rest_position) = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;        
         pose.ensure_covers(&skeleton);
         let Some(root_index) = skeleton.bones.iter().position(|bone| bone.parent.is_none())
         else {
@@ -349,8 +345,8 @@ pub fn move_character(x: f64, y: f64) -> bool {
     };
 
     let skin_matrices = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
         pose.root_offset = target - rest_position;
         pose.skinning_matrices(&skeleton)
     };
@@ -373,8 +369,9 @@ pub fn set_travel_speed(speed: f32) -> bool {
     let Some(right) = crate::ffi::with_active_renderer(|renderer| renderer.view_right()) else {
         return false;
     };
-    let mut timeline = crate::scene_state::TIMELINE.lock().unwrap();
-    timeline.travel_velocity = right * speed;
+    let mut active = crate::scene_state::active_object();
+    let timeline = &mut active.timeline;
+    timeline.travel_velocity = right * speed;  
     timeline.travel_speed = speed;
     true
 }
@@ -382,7 +379,7 @@ pub fn set_travel_speed(speed: f32) -> bool {
 /// The Travel slider's current value (units per second).
 #[flutter_rust_bridge::frb(sync)]
 pub fn travel_speed() -> f32 {
-    crate::scene_state::TIMELINE.lock().unwrap().travel_speed
+    crate::scene_state::active_object().timeline.travel_speed
 }
 
 /// Saves the skeleton, skin weights and animation to `path` as a JSON
@@ -391,9 +388,10 @@ pub fn travel_speed() -> f32 {
 pub fn save_project(path: String) -> (bool, String) {
     let vertex_count =
         crate::ffi::with_active_renderer(|renderer| renderer.mesh_positions().len()).unwrap_or(0);
-    let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-    let weights = crate::scene_state::WEIGHTS.lock().unwrap();
-    let timeline = crate::scene_state::TIMELINE.lock().unwrap();
+    let active = crate::scene_state::active_object();
+    let skeleton = &active.skeleton;
+    let weights = &active.weights;
+    let timeline = &active.timeline;    
     match crate::project::write_project(
         &path,
         vertex_count,
@@ -455,10 +453,8 @@ pub fn load_project(path: String) -> (bool, String) {
         project.timeline.keys.len()
     );
     {
-        let mut skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
-        let mut weights = crate::scene_state::WEIGHTS.lock().unwrap();
-        let mut timeline = crate::scene_state::TIMELINE.lock().unwrap();
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, weights, timeline } = &mut *active;
         *pose = crate::pose::Pose::rest_for(&project.skeleton);
         *skeleton = project.skeleton;
         *weights = project.weights;
@@ -474,9 +470,9 @@ pub fn load_project(path: String) -> (bool, String) {
 #[flutter_rust_bridge::frb(sync)]
 pub fn joint_screen_positions() -> Vec<Option<(f32, f32)>> {
     let positions = {
-        let skeleton = crate::scene_state::SKELETON.lock().unwrap();
-        let mut pose = crate::scene_state::POSE.lock().unwrap();
-        pose.ensure_covers(&skeleton);
+        let mut active = crate::scene_state::active_object();
+        let crate::scene_state::Object { skeleton, pose, .. } = &mut *active;
+    pose.ensure_covers(&skeleton);
         pose.posed_joint_positions(&skeleton)
     };
 
@@ -491,9 +487,8 @@ pub fn joint_screen_positions() -> Vec<Option<(f32, f32)>> {
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn bone_parents() -> Vec<Option<usize>> {
-    crate::scene_state::SKELETON
-        .lock()
-        .unwrap()
+    crate::scene_state::active_object()
+        .skeleton
         .bones
         .iter()
         .map(|bone| bone.parent)
@@ -505,12 +500,7 @@ pub fn bone_parents() -> Vec<Option<usize>> {
 /// start placing bones over from a clean state.
 #[flutter_rust_bridge::frb(sync)]
 pub fn reset_skeleton() {
-    *crate::scene_state::SKELETON.lock().unwrap() = crate::rig::Skeleton::default();
-    *crate::scene_state::WEIGHTS.lock().unwrap() = None;
-    *crate::scene_state::POSE.lock().unwrap() = crate::pose::Pose::default();
-    *crate::scene_state::TIMELINE.lock().unwrap() = crate::keyframes::Timeline::default();
-    // Also put the GPU's bone matrices back to identity so the mesh
-    // returns to its rest look instead of staying visibly posed.
+    *crate::scene_state::active_object() = crate::scene_state::Object::default();
     crate::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
 }
 /// Orbits the camera by the given angle deltas (radians) around its
@@ -525,9 +515,9 @@ pub fn orbit_camera(delta_yaw: f64, delta_pitch: f64) {
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn set_vertex_weight(vertex_index: usize, bone_index: usize) -> bool {
-    let mut weights_guard = crate::scene_state::WEIGHTS.lock().unwrap();
-    let Some(weights) = weights_guard.as_mut() else {
-        return false;
+    let mut active = crate::scene_state::active_object();
+    let Some(weights) = active.weights.as_mut() else {
+    return false;
     };
     let Some(vertex_weights) = weights.get_mut(vertex_index) else {
         return false;
@@ -543,6 +533,5 @@ pub fn set_vertex_weight(vertex_index: usize, bone_index: usize) -> bool {
 
 #[flutter_rust_bridge::frb(init)]
 pub fn init_app() {
-    // Default utilities - feel free to customize
     flutter_rust_bridge::setup_default_user_utils();
 }
