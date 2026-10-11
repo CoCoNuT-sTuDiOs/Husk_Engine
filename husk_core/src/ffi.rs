@@ -84,8 +84,27 @@ pub extern "C" fn husk_renderer_render_frame(handle: *mut Renderer) {
     if handle.is_null() {
         return;
     }
+    // Hold the registry lock while drawing, so a Dart call can't change the
+    // renderer mid-frame. If a Dart call is busy, skip this frame instead
+    // of making the window wait.
+    let Ok(_active) = ACTIVE_RENDERER.try_lock() else {
+        return;
+    };
     let renderer = unsafe { &mut *handle };
     renderer.render_frame();
+}
+
+/// Changes the renderer's size so the viewport can follow its panel.
+/// Takes the same lock as every Dart call, so nothing else touches the
+/// renderer while its GPU buffers are recreated.
+#[unsafe(no_mangle)]
+pub extern "C" fn husk_renderer_resize(handle: *mut Renderer, width: u32, height: u32) {
+    if handle.is_null() {
+        return;
+    }
+    let _active = ACTIVE_RENDERER.lock().unwrap();
+    let renderer = unsafe { &mut *handle };
+    renderer.resize(width, height);
 }
 
 /// Returns a pointer to the most recently rendered frame's pixel data.

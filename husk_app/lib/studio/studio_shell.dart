@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:husk_app/studio/studio_controller.dart';
 import 'package:husk_app/studio/studio_theme.dart';
+import 'package:husk_app/studio/timeline_controller.dart';
+import 'package:husk_app/studio/timeline_pane.dart';
 import 'package:husk_app/studio/viewport_pane.dart';
 import 'package:phosphor_icons/phosphor_icons.dart';
 
@@ -14,13 +16,17 @@ class StudioShell extends StatefulWidget {
 
 class _StudioShellState extends State<StudioShell> {
   final StudioController _controller = StudioController();
+  // Keeps the viewport's state (texture, size) when it moves between the
+  // normal layout and the maximized one.
+  final GlobalKey _viewportKey = GlobalKey();
+  final TimelineController _timeline = TimelineController();
 
   @override
   void dispose() {
     _controller.dispose();
+    _timeline.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -28,19 +34,31 @@ class _StudioShellState extends State<StudioShell> {
         children: [
           const _TopBar(),
           Expanded(
-            child: Row(
-              children: [
-                const _ToolColumn(),
-                Expanded(
-                  child: Column(
-                    children: [
-                      Expanded(child: ViewportPane(controller: _controller)),
-                      const _TimelinePane(),
-                    ],
-                  ),
-                ),
-                const _SidePanel(),
-              ],
+            child: ListenableBuilder(
+              listenable: _controller,
+              builder: (context, _) {
+                final viewport = ViewportPane(
+                  key: _viewportKey,
+                  controller: _controller,
+                );
+                if (_controller.viewportMaximized) {
+                  return viewport;
+                }
+                return Row(
+                  children: [
+                    const _ToolColumn(),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Expanded(child: viewport),
+                          TimelinePane(timeline: _timeline, studio: _controller),
+                        ],
+                      ),
+                    ),
+                    const _SidePanel(),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -48,6 +66,7 @@ class _StudioShellState extends State<StudioShell> {
     );
   }
 }
+
 
 class _TopBar extends StatelessWidget {
   const _TopBar();
@@ -165,38 +184,6 @@ class _ToolButton extends StatelessWidget {
   }
 }
 
-
-class _TimelinePane extends StatelessWidget {
-  const _TimelinePane();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 200,
-      decoration: const BoxDecoration(
-        color: HuskColors.panel,
-        border: Border(top: BorderSide(color: HuskColors.border)),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _PanelHeader(
-            title: 'Timeline',
-            trailing: Text('0.00 s', style: HuskText.readout),
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                'Keys, playhead and repeat arrive in UI-1c',
-                style: HuskText.readout,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _SidePanel extends StatelessWidget {
   const _SidePanel();

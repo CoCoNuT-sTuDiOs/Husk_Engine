@@ -102,6 +102,11 @@ void FlutterWindow::SetUpHuskTexture() {
   const uint32_t width = 1000;
   const uint32_t height = 1000;
   husk_renderer_ = husk_bridge_.CreateRenderer(width, height);
+  husk_width_ = width;
+  husk_height_ = height;
+  // The bridge already loaded the DLL, so this only finds its resize function.
+  husk_resize_ = reinterpret_cast<HuskResizeFn>(GetProcAddress(
+      GetModuleHandleW(L"husk_core.dll"), "husk_renderer_resize"));
   husk_bridge_.RenderFrame(husk_renderer_);
 
   // ~30 FPS test loop. Will be replaced with a proper render/vsync loop
@@ -128,19 +133,63 @@ flutter::PixelBufferTexture(
                  result) {
         if (call.method_name() == "getTextureId") {
           result->Success(flutter::EncodableValue(husk_texture_id_));
+        } else if (call.method_name() == "resize") {
+          int32_t new_width = 0;
+          int32_t new_height = 0;
+          const auto* arguments =
+              std::get_if<flutter::EncodableMap>(call.arguments());
+          if (arguments) {
+            auto width_entry =
+                arguments->find(flutter::EncodableValue("width"));
+            auto height_entry =
+                arguments->find(flutter::EncodableValue("height"));
+            if (width_entry != arguments->end()) {
+              if (const auto* value =
+                      std::get_if<int32_t>(&width_entry->second)) {
+                new_width = *value;
+              }
+            }
+            if (height_entry != arguments->end()) {
+              if (const auto* value =
+                      std::get_if<int32_t>(&height_entry->second)) {
+                new_height = *value;
+              }
+            }
+          }
+          if (new_width < 16 || new_width > 4096 || new_height < 16 ||
+              new_height > 4096 || !husk_renderer_ || !husk_resize_) {
+            result->Error("bad_resize",
+                          "Resize needs a width and height between 16 and 4096");
+          } else {
+            ResizeHuskRenderer(static_cast<uint32_t>(new_width),
+                               static_cast<uint32_t>(new_height));
+            result->Success();
+          }
         } else {
-          result->NotImplemented();
+                  result->NotImplemented();
         }
       });
 }
 
 const FlutterDesktopPixelBuffer* FlutterWindow::CopyHuskPixelBuffer(
     size_t width, size_t height) {
+  // Read the frame's pointer and size together, so a resize on the other
+  // thread can never leave them out of step.
+  std::lock_guard<std::mutex> lock(husk_frame_mutex_);
   husk_pixel_buffer_descriptor_.buffer =
-      husk_bridge_.FramePtr(husk_renderer_);
-  husk_pixel_buffer_descriptor_.width = 1000;
-  husk_pixel_buffer_descriptor_.height = 1000;
+  husk_bridge_.FramePtr(husk_renderer_);
+  husk_pixel_buffer_descriptor_.width = husk_width_;
+  husk_pixel_buffer_descriptor_.height = husk_height_;  
   husk_pixel_buffer_descriptor_.release_callback = nullptr;
   husk_pixel_buffer_descriptor_.release_context = nullptr;
   return &husk_pixel_buffer_descriptor_;
+}
+
+void FlutterWindow::ResizeHuskRenderer(uint32_t width, uint32_t height) {
+  // Held while the size changes so the engine never reads a frame together
+  // with the wrong size.
+  std::lock_guard<std::mutex> lock(husk_frame_mutex_);
+  husk_resize_(husk_renderer_, width, height);
+  husk_width_ = width;
+  husk_height_ = height;
 }

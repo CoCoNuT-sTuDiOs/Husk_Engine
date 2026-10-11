@@ -86,6 +86,7 @@ pub struct Renderer {
     width: u32,
     height: u32,
     last_frame: Vec<u8>,
+    retired_frames: Vec<Vec<u8>>,
     pipeline: wgpu::RenderPipeline,
     objects: Vec<RenderObject>,
     active_object: usize,
@@ -291,6 +292,7 @@ impl Renderer {
             width,
             height,
             last_frame: Vec::new(),
+            retired_frames: Vec::new(),
             pipeline,
             objects: vec![first_object],
             active_object: 0,
@@ -461,8 +463,70 @@ impl Renderer {
         self.orbit_distance = (self.orbit_distance * factor).clamp(0.3, 500.0);
     }
 
+/// Changes the render size so the viewport can follow its panel.
+    /// Recreates only the size-dependent GPU resources.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let width = width.clamp(16, 4096);
+        let height = height.clamp(16, 4096);
+        if width == self.width && height == self.height {
+            return;
+        }
+
+        self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("husk_offscreen_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        self.depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("husk_depth_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.depth_view = self
+            .depth_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let unpadded_bytes_per_row = width * BYTES_PER_PIXEL;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+        self.output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("husk_readback_buffer"),
+            size: (padded_bytes_per_row * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        self.width = width;
+        self.height = height;
+
+        let fresh = vec![0u8; (width * height * BYTES_PER_PIXEL) as usize];
+        let old = std::mem::replace(&mut self.last_frame, fresh);
+        self.retired_frames.push(old);
+        if self.retired_frames.len() > 3 {
+            self.retired_frames.remove(0);
+        }
+    }
+
     pub fn render_frame(&mut self) {
-        let frame_start = Instant::now();
+    let frame_start = Instant::now();
 
         let view = self
             .texture
