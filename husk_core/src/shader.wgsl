@@ -38,7 +38,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     let skinned_position = skin_matrix * vec4<f32>(in.position, 1.0);
     let skinned_normal = skin_matrix * vec4<f32>(in.normal, 0.0);
 
-    out.clip_position = scene.view_proj * skinned_position;
+out.clip_position = scene.view_proj * scene.model * skinned_position;
     out.world_normal = (scene.model * skinned_normal).xyz;
     return out;
 }

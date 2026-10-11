@@ -1,5 +1,5 @@
+use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
-
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -43,6 +43,15 @@ impl Vertex {
 
 const MAX_BONES: usize = 128;
 
+/// Base colours for the first few objects so they can be told apart:
+/// Husk orange, tool blue, green and red from the palette.
+const OBJECT_COLORS: [[f32; 4]; 4] = [
+    [0.976, 0.451, 0.086, 1.0],
+    [0.231, 0.510, 0.965, 1.0],
+    [0.133, 0.773, 0.369, 1.0],
+    [0.937, 0.267, 0.267, 1.0],
+];
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct SceneUniform {
@@ -54,6 +63,21 @@ struct SceneUniform {
     material: [f32; 4],
 }
 
+/// One drawable thing in the scene: its own geometry, its own bone
+/// matrices, and its own placement and colour.
+struct RenderObject {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    num_indices: u32,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    bone_matrices_buffer: wgpu::Buffer,
+    bone_bind_group: wgpu::BindGroup,
+    mesh_data: crate::asset_import::MeshData,
+    model: glam::Mat4,
+    base_color: [f32; 4],
+}
+
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -61,34 +85,32 @@ pub struct Renderer {
     output_buffer: wgpu::Buffer,
     width: u32,
     height: u32,
-    last_frame: Vec<u8>,    
+    last_frame: Vec<u8>,
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
-    uniform_buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    objects: Vec<RenderObject>,
+    active_object: usize,
+    bind_group_layout: wgpu::BindGroupLayout,
+    bone_bind_group_layout: wgpu::BindGroupLayout,
+    frame_time_total: Duration,
+    frame_time_count: u32,
     #[allow(dead_code)]
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    mesh_data: crate::asset_import::MeshData,
     last_view_proj: glam::Mat4,
-    bone_matrices_buffer: wgpu::Buffer,
-    bone_bind_group: wgpu::BindGroup,
     orbit_yaw: f32,
     orbit_pitch: f32,
     orbit_distance: f32,
     orbit_target: glam::Vec3,
 }
-const BYTES_PER_PIXEL: u32 = 4;
 
+const BYTES_PER_PIXEL: u32 = 4;
 
 impl Renderer {
     pub fn new(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {
         pollster::block_on(Self::new_async(width, height, mesh))
     }
 
-    async fn new_async(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {        
+    async fn new_async(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -130,8 +152,7 @@ impl Renderer {
         // padding gets stripped back out afterward (see render_frame).
         let unpadded_bytes_per_row = width * BYTES_PER_PIXEL;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row =
-            (unpadded_bytes_per_row + align - 1) / align * align;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
 
         let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("husk_readback_buffer"),
@@ -160,13 +181,6 @@ impl Renderer {
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("husk_scene_uniform_buffer"),
-            size: std::mem::size_of::<SceneUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("husk_scene_bind_group_layout"),
@@ -181,25 +195,6 @@ impl Renderer {
                     count: None,
                 }],
             });
-
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("husk_camera_bind_group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
-
-        let identity_bone_matrices: Vec<[[f32; 4]; 4]> =
-            vec![glam::Mat4::IDENTITY.to_cols_array_2d(); MAX_BONES];
-
-        let bone_matrices_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("husk_bone_matrices_buffer"),
-            contents: bytemuck::cast_slice(&identity_bone_matrices),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
 
         let bone_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -216,22 +211,11 @@ impl Renderer {
                 }],
             });
 
-        let bone_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("husk_bone_bind_group"),
-            layout: &bone_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: bone_matrices_buffer.as_entire_binding(),
-            }],
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("husk_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout, &bone_bind_group_layout],
+            push_constant_ranges: &[],
         });
-
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("husk_pipeline_layout"),
-                bind_group_layouts: &[&bind_group_layout, &bone_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("husk_cube_pipeline"),
@@ -273,36 +257,6 @@ impl Renderer {
             cache: None,
         });
 
-        let mesh_vertices: Vec<Vertex> = mesh
-            .positions
-            .iter()
-            .zip(mesh.normals.iter())
-            .map(|(position, normal)| Vertex {
-                position: *position,
-                normal: *normal,
-                // Defaults to fully-weighted-to-bone-0 with an identity
-                // matrix there a mathematical no-op until real skin
-                joint_indices: [0, 0, 0, 0],
-                weights: [1.0, 0.0, 0.0, 0.0],
-            })
-            .collect();
-
-
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("husk_mesh_vertex_buffer"),
-            contents: bytemuck::cast_slice(&mesh_vertices),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("husk_mesh_index_buffer"),
-            contents: bytemuck::cast_slice(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let num_indices = mesh.indices.len() as u32;
-
         let mut orbit_target = glam::Vec3::ZERO;
         let mut orbit_distance = 3.354_102_f32;
         if !mesh.positions.is_empty() {
@@ -320,6 +274,15 @@ impl Renderer {
                 (longest_side * 0.5 / (std::f32::consts::FRAC_PI_4 * 0.5).tan()) * 1.25;
         }
 
+        let first_object = Self::create_object(
+            &device,
+            &bind_group_layout,
+            &bone_bind_group_layout,
+            mesh,
+            glam::Mat4::IDENTITY,
+            OBJECT_COLORS[0],
+        );
+
         Self {
             device,
             queue,
@@ -327,20 +290,17 @@ impl Renderer {
             output_buffer,
             width,
             height,
-           // frame: 0,
             last_frame: Vec::new(),
             pipeline,
-            vertex_buffer,
-            index_buffer,
-            num_indices,
-            uniform_buffer,
-            bind_group,
+            objects: vec![first_object],
+            active_object: 0,
+            bind_group_layout,
+            bone_bind_group_layout,
+            frame_time_total: Duration::ZERO,
+            frame_time_count: 0,
             depth_texture,
             depth_view,
-            mesh_data: mesh,
             last_view_proj: glam::Mat4::IDENTITY,
-            bone_matrices_buffer,
-            bone_bind_group,
             // Matches the original fixed camera exactly (eye (0, 1.5, 3),
             // looking at the origin) just expressed as orbit parameters
             // now instead of a hardcoded eye position.
@@ -349,6 +309,143 @@ impl Renderer {
             orbit_distance: 3.354_102,
             orbit_target,
         }
+    }
+
+    /// Builds the GPU resources for one drawable object: its own geometry,
+    /// its own uniform (carrying its placement and colour) and its own
+    /// bone matrices, starting at the plain no-skin defaults.
+    fn create_object(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        bone_bind_group_layout: &wgpu::BindGroupLayout,
+        mesh: crate::asset_import::MeshData,
+        model: glam::Mat4,
+        base_color: [f32; 4],
+    ) -> RenderObject {
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("husk_scene_uniform_buffer"),
+            size: std::mem::size_of::<SceneUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("husk_object_bind_group"),
+            layout: bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        let identity_bone_matrices: Vec<[[f32; 4]; 4]> =
+            vec![glam::Mat4::IDENTITY.to_cols_array_2d(); MAX_BONES];
+
+        let bone_matrices_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("husk_bone_matrices_buffer"),
+            contents: bytemuck::cast_slice(&identity_bone_matrices),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bone_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("husk_bone_bind_group"),
+            layout: bone_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: bone_matrices_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Fully weighted to bone 0, which holds an identity matrix: a
+        // mathematical no-op until real skin weights arrive.
+        let vertices: Vec<Vertex> = mesh
+            .positions
+            .iter()
+            .zip(mesh.normals.iter())
+            .map(|(position, normal)| Vertex {
+                position: *position,
+                normal: *normal,
+                joint_indices: [0, 0, 0, 0],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            })
+            .collect();
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("husk_mesh_vertex_buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("husk_mesh_index_buffer"),
+            contents: bytemuck::cast_slice(&mesh.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let num_indices = mesh.indices.len() as u32;
+
+        RenderObject {
+            vertex_buffer,
+            index_buffer,
+            num_indices,
+            uniform_buffer,
+            bind_group,
+            bone_matrices_buffer,
+            bone_bind_group,
+            mesh_data: mesh,
+            model,
+            base_color,
+        }
+    }
+
+    /// Adds another object to the scene and returns its index. Section 5c
+    /// will use this for the add-model action.
+    pub fn add_object(
+        &mut self,
+        mesh: crate::asset_import::MeshData,
+        model: glam::Mat4,
+        base_color: [f32; 4],
+    ) -> usize {
+        let object = Self::create_object(
+            &self.device,
+            &self.bind_group_layout,
+            &self.bone_bind_group_layout,
+            mesh,
+            model,
+            base_color,
+        );
+        self.objects.push(object);
+        self.objects.len() - 1
+    }
+
+    /// TEMPORARY (Section 5b test, removed once 5c can add real shapes):
+    /// puts a small blue cube beside the first object so two meshes are
+    /// visible at once.
+    pub fn add_test_cube(&mut self) {
+        let positions = &self.objects[0].mesh_data.positions;
+        if positions.is_empty() {
+            return;
+        }
+        let mut bounds_min = glam::Vec3::splat(f32::MAX);
+        let mut bounds_max = glam::Vec3::splat(f32::MIN);
+        for position in positions {
+            let p = glam::Vec3::from(*position);
+            bounds_min = bounds_min.min(p);
+            bounds_max = bounds_max.max(p);
+        }
+        let size = (bounds_max - bounds_min).max_element() * 0.25;
+        let centre = glam::Vec3::new(
+            bounds_max.x + size * 1.5,
+            bounds_min.y + size * 0.5,
+            (bounds_min.z + bounds_max.z) * 0.5,
+        );
+        let model = glam::Mat4::from_translation(centre)
+            * glam::Mat4::from_scale(glam::Vec3::splat(size));
+        self.add_object(
+            crate::asset_import::MeshData::unit_cube(),
+            model,
+            OBJECT_COLORS[1],
+        );
     }
 
     /// Adjusts the camera's orbit angles by the given deltas (radians).
@@ -365,7 +462,9 @@ impl Renderer {
     }
 
     pub fn render_frame(&mut self) {
-    let view = self
+        let frame_start = Instant::now();
+
+        let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -383,31 +482,32 @@ impl Renderer {
                 );
         let view_matrix = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
 
-        let model = glam::Mat4::IDENTITY;
-        let view_proj = projection * view_matrix * model;        
+        // Each object's own placement is applied in the shader (scene.model),
+        // so this is just the camera.
+        let view_proj = projection * view_matrix;
         self.last_view_proj = view_proj;
 
-        let scene_uniform = SceneUniform {
-            view_proj: view_proj.to_cols_array_2d(),
-            model: model.to_cols_array_2d(),
-            light_dir: {
-                // A light that travels with the camera: it shines from the
-                // viewer's side, a little from above and from the left, so
-                // whatever faces the camera is lit however you orbit.
-                let shine = ((target - eye).normalize() + glam::Vec3::new(0.3, -0.5, 0.0))
-                    .normalize();
-                [shine.x, shine.y, shine.z, 0.0]
-            },
-            light_color: [1.0, 1.0, 1.0, 1.0],
-            base_color: [0.976, 0.451, 0.086, 1.0],
-            material: [0.4, 0.2, 0.0, 0.0],
-        };
-        self.queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&[scene_uniform]),
-        );
+        // A light that travels with the camera: it shines from the
+        // viewer's side, a little from above and from the left, so
+        // whatever faces the camera is lit however you orbit.
+        let shine = ((target - eye).normalize() + glam::Vec3::new(0.3, -0.5, 0.0)).normalize();
+        let light_dir = [shine.x, shine.y, shine.z, 0.0];
 
+        for object in &self.objects {
+            let scene_uniform = SceneUniform {
+                view_proj: view_proj.to_cols_array_2d(),
+                model: object.model.to_cols_array_2d(),
+                light_dir,
+                light_color: [1.0, 1.0, 1.0, 1.0],
+                base_color: object.base_color,
+                material: [0.4, 0.2, 0.0, 0.0],
+            };
+            self.queue.write_buffer(
+                &object.uniform_buffer,
+                0,
+                bytemuck::cast_slice(&[scene_uniform]),
+            );
+        }
 
         let mut encoder = self
             .device
@@ -441,18 +541,18 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_bind_group(1, &self.bone_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);           
-            pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            for object in &self.objects {
+                pass.set_bind_group(0, &object.bind_group, &[]);
+                pass.set_bind_group(1, &object.bone_bind_group, &[]);
+                pass.set_vertex_buffer(0, object.vertex_buffer.slice(..));
+                pass.set_index_buffer(object.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..object.num_indices, 0, 0..1);
+            }
         }
-
 
         let unpadded_bytes_per_row = self.width * BYTES_PER_PIXEL;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row =
-            (unpadded_bytes_per_row + align - 1) / align * align;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
 
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
@@ -507,6 +607,20 @@ impl Renderer {
         }
         self.output_buffer.unmap();
 
+        // Average frame time over every 120 frames, including the GPU
+        // readback, so the number reflects what a real frame costs.
+        self.frame_time_total += frame_start.elapsed();
+        self.frame_time_count += 1;
+        if self.frame_time_count == 120 {
+            eprintln!(
+                "Husk: {} object(s), average frame time {:.1} ms over {} frames",
+                self.objects.len(),
+                self.frame_time_total.as_secs_f64() * 1000.0 / self.frame_time_count as f64,
+                self.frame_time_count
+            );
+            self.frame_time_total = Duration::ZERO;
+            self.frame_time_count = 0;
+        }
     }
 
     pub fn frame_ptr(&self) -> *const u8 {
@@ -521,20 +635,22 @@ impl Renderer {
     /// everywhere else (skinning, picking) needed so weight computation
     /// can be done against whatever mesh is actually loaded right now.
     pub fn mesh_positions(&self) -> &[[f32; 3]] {
-        &self.mesh_data.positions
+        &self.objects[self.active_object].mesh_data.positions
     }
 
     /// The active mesh's triangle indices (three per triangle), needed to
     /// voxelize the mesh for geodesic skin weighting.
     pub fn mesh_indices(&self) -> &[u32] {
-        &self.mesh_data.indices
+        &self.objects[self.active_object].mesh_data.indices
     }
+
     pub fn update_vertex_weights(&self, weights: &[crate::skinning::VertexWeights]) {
-        let updated: Vec<Vertex> = self
+        let object = &self.objects[self.active_object];
+        let updated: Vec<Vertex> = object
             .mesh_data
             .positions
             .iter()
-            .zip(self.mesh_data.normals.iter())
+            .zip(object.mesh_data.normals.iter())
             .zip(weights.iter())
             .map(|((position, normal), w)| Vertex {
                 position: *position,
@@ -545,14 +661,17 @@ impl Renderer {
             .collect();
 
         self.queue
-            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&updated));
+            .write_buffer(&object.vertex_buffer, 0, bytemuck::cast_slice(&updated));
     }
 
     pub fn set_bone_matrices(&self, matrices: &[glam::Mat4]) {
         let mut data: Vec<[[f32; 4]; 4]> = matrices.iter().map(|m| m.to_cols_array_2d()).collect();
         data.resize(MAX_BONES, glam::Mat4::IDENTITY.to_cols_array_2d());
-        self.queue
-            .write_buffer(&self.bone_matrices_buffer, 0, bytemuck::cast_slice(&data));
+        self.queue.write_buffer(
+            &self.objects[self.active_object].bone_matrices_buffer,
+            0,
+            bytemuck::cast_slice(&data),
+        );
     }
 
     pub fn project_to_screen(&self, world_point: glam::Vec3) -> Option<(f32, f32)> {
@@ -633,6 +752,8 @@ impl Renderer {
     /// Like `pick`, but returns the point halfway through the mesh along
     /// the ray (between where it enters and where it last exits) instead
     /// of the front surface, so bones land inside a limb, not on its skin.
+    /// Works on the active object and assumes it sits at the origin
+    /// (true until Section 5d adds object transforms).
     pub fn pick_inside(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
         let ray = crate::picking::Ray::from_screen(
             screen_x,
@@ -641,13 +762,15 @@ impl Renderer {
             self.height as f32,
             self.last_view_proj,
         );
-        crate::picking::ray_mesh_midpoint(&ray, &self.mesh_data.positions, &self.mesh_data.indices)
+        let mesh = &self.objects[self.active_object].mesh_data;
+        crate::picking::ray_mesh_midpoint(&ray, &mesh.positions, &mesh.indices)
     }
 
     /// Casts a ray from a screen-space point (in pixels, matching this
     /// renderer's own width/height) using the camera matrix from the most
     /// recently rendered frame, and returns the world-space point where it
-    /// hits the mesh, if any.
+    /// hits the active object's mesh, if any. Assumes the active object
+    /// sits at the origin (true until Section 5d adds object transforms).
     pub fn pick(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
         let ray = crate::picking::Ray::from_screen(
             screen_x,
@@ -656,7 +779,8 @@ impl Renderer {
             self.height as f32,
             self.last_view_proj,
         );
-        crate::picking::ray_mesh_intersection(&ray, &self.mesh_data.positions, &self.mesh_data.indices)
+        let mesh = &self.objects[self.active_object].mesh_data;
+        crate::picking::ray_mesh_intersection(&ray, &mesh.positions, &mesh.indices)
             .map(|hit| hit.point)
     }
 }

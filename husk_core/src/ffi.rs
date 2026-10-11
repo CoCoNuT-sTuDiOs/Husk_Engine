@@ -56,8 +56,9 @@ pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer
                 (mesh, None)
             }
         };
-    let renderer = Box::new(Renderer::new(width, height, mesh));
-
+let mut renderer = Box::new(Renderer::new(width, height, mesh));
+    // TEMPORARY (Section 5b test): a second mesh beside the character.
+    renderer.add_test_cube();
     // Hand the imported rig to the renderer and to the shared scene state,
     // so the overlay, dragging and posing tools all see it.
     if let Some((skeleton, vertex_weights)) = rig {
