@@ -122,6 +122,14 @@ class TimelineController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void refresh() {
+    if (_playing) _stopPlayback();
+    _refreshKeys();
+    _travelSpeed = rust.travelSpeed();
+    _time = 0.0;
+    notifyListeners();
+  }
+
   String save() => rust.saveProject(path: projectPath).$2;
 
   String load() {

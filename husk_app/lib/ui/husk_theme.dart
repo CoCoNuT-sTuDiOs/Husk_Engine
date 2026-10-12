@@ -32,7 +32,7 @@ class HuskText {
   );
 }
 
-ThemeData buildStudioTheme() {
+ThemeData buildHuskTheme() {
   const scheme = ColorScheme.dark(
     primary: HuskColors.orange,
     onPrimary: HuskColors.canvas,
@@ -65,6 +65,33 @@ ThemeData buildStudioTheme() {
         side: const BorderSide(color: HuskColors.border),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         textStyle: const TextStyle(fontFamily: HuskText.ui, fontSize: 13),
+      ),
+    ),
+    menuBarTheme: MenuBarThemeData(
+      style: MenuStyle(
+        backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(0),
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+      ),
+    ),
+    menuTheme: MenuThemeData(
+      style: MenuStyle(
+        backgroundColor: const WidgetStatePropertyAll(HuskColors.elevated),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        side: const WidgetStatePropertyAll(
+          BorderSide(color: HuskColors.border),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+      ),
+    ),
+    menuButtonTheme: const MenuButtonThemeData(
+      style: ButtonStyle(
+        foregroundColor: WidgetStatePropertyAll(HuskColors.textPrimary),
+        textStyle: WidgetStatePropertyAll(
+          TextStyle(fontFamily: HuskText.ui, fontSize: 13),
+        ),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(

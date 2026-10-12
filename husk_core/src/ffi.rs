@@ -94,9 +94,6 @@ pub extern "C" fn husk_renderer_render_frame(handle: *mut Renderer) {
     renderer.render_frame();
 }
 
-/// Changes the renderer's size so the viewport can follow its panel.
-/// Takes the same lock as every Dart call, so nothing else touches the
-/// renderer while its GPU buffers are recreated.
 #[unsafe(no_mangle)]
 pub extern "C" fn husk_renderer_resize(handle: *mut Renderer, width: u32, height: u32) {
     if handle.is_null() {
