@@ -1,4 +1,4 @@
-use crate::renderer::Renderer;
+use crate::render::renderer::Renderer;
 use std::sync::Mutex;
 
 static ACTIVE_RENDERER: Mutex<Option<usize>> = Mutex::new(None);
@@ -41,30 +41,28 @@ pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer
     const RIGGED_TEST_MODEL: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/off.glb");
     let (mesh, rig) =
-        match crate::rig_import::load_gltf_rig(RIGGED_TEST_MODEL, MAX_DESKTOP_TRIANGLES) {
+        match crate::import::rigged::load_gltf_rig(RIGGED_TEST_MODEL, MAX_DESKTOP_TRIANGLES) {
             Ok(model) => (model.mesh, Some((model.skeleton, model.vertex_weights))),
             Err(e) => {
                 eprintln!("Husk: rigged test model not loaded ({e}), trying the plain mesh");
-                let mesh = crate::asset_import::load_gltf(
+                let mesh = crate::import::mesh::load_gltf(
                 "C:\\Users\\HomePC\\Downloads\\the_amazing_spiderman.glb",
                     MAX_DESKTOP_TRIANGLES,
                 )
                 .unwrap_or_else(|e| {
                     eprintln!("Husk: failed to load test mesh ({e}), rendering empty scene");
-                    crate::asset_import::MeshData::default()
+                    crate::geometry::mesh::MeshData::default()
                 });
                 (mesh, None)
             }
         };
 let mut renderer = Box::new(Renderer::new(width, height, mesh));
-    // TEMPORARY (Section 5b test): a second mesh beside the character.
-    renderer.add_test_cube();
     // Hand the imported rig to the renderer and to the shared scene state,
     // so the overlay, dragging and posing tools all see it.
     if let Some((skeleton, vertex_weights)) = rig {
         renderer.update_vertex_weights(&vertex_weights);
-        let mut active = crate::scene_state::active_object();
-        active.pose = crate::pose::Pose::rest_for(&skeleton);
+        let mut active = crate::scene::active_object();
+        active.pose = crate::animation::pose::Pose::rest_for(&skeleton);
         active.skeleton = skeleton;
         active.weights = Some(vertex_weights);
 

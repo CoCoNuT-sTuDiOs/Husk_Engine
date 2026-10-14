@@ -1,4 +1,4 @@
-use husk_core::asset_import::load_gltf;
+use husk_core::import::mesh::load_gltf;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

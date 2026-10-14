@@ -1,8 +1,8 @@
 use glam::{Mat3, Mat4, Vec3};
-use crate::asset_import::MeshData;
-use crate::geodesic::STATIC_INFLUENCE_INDEX;
+use crate::geometry::mesh::MeshData;
+use crate::rig::geodesic::STATIC_INFLUENCE_INDEX;
 use crate::rig::{Bone, Skeleton};
-use crate::skinning::VertexWeights;
+use crate::rig::skinning::VertexWeights;
 
 /// A rigged character read from a glTF/GLB file: geometry, skeleton, and
 /// the file's own per-vertex skin weights, all in Husk's formats.

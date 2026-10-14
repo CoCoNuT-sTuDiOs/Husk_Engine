@@ -1,7 +1,7 @@
 use husk_core::api::simple::{compute_weights, get_vertex_dominant_bone, set_vertex_weight};
-use husk_core::ffi::{husk_renderer_create, husk_renderer_destroy};
+use husk_core::platform::ffi::{husk_renderer_create, husk_renderer_destroy};
 use husk_core::rig::Skeleton;
-use husk_core::scene_state::active_object;
+use husk_core::scene::active_object;
 
 fn main() {
     let handle = husk_renderer_create(256, 256);

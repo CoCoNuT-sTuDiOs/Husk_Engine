@@ -73,7 +73,7 @@ struct RenderObject {
     bind_group: wgpu::BindGroup,
     bone_matrices_buffer: wgpu::Buffer,
     bone_bind_group: wgpu::BindGroup,
-    mesh_data: crate::asset_import::MeshData,
+    mesh_data: crate::geometry::mesh::MeshData,
     model: glam::Mat4,
     base_color: [f32; 4],
 }
@@ -107,11 +107,11 @@ pub struct Renderer {
 const BYTES_PER_PIXEL: u32 = 4;
 
 impl Renderer {
-    pub fn new(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {
+    pub fn new(width: u32, height: u32, mesh: crate::geometry::mesh::MeshData) -> Self {
         pollster::block_on(Self::new_async(width, height, mesh))
     }
 
-    async fn new_async(width: u32, height: u32, mesh: crate::asset_import::MeshData) -> Self {
+    async fn new_async(width: u32, height: u32, mesh: crate::geometry::mesh::MeshData) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -320,7 +320,7 @@ impl Renderer {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
         bone_bind_group_layout: &wgpu::BindGroupLayout,
-        mesh: crate::asset_import::MeshData,
+        mesh: crate::geometry::mesh::MeshData,
         model: glam::Mat4,
         base_color: [f32; 4],
     ) -> RenderObject {
@@ -404,7 +404,7 @@ impl Renderer {
     /// will use this for the add-model action.
     pub fn add_object(
         &mut self,
-        mesh: crate::asset_import::MeshData,
+        mesh: crate::geometry::mesh::MeshData,
         model: glam::Mat4,
         base_color: [f32; 4],
     ) -> usize {
@@ -420,35 +420,38 @@ impl Renderer {
         self.objects.len() - 1
     }
 
-    /// TEMPORARY (Section 5b test, removed once 5c can add real shapes):
-    /// puts a small blue cube beside the first object so two meshes are
-    /// visible at once.
-    pub fn add_test_cube(&mut self) {
+    /// Adds a built-in shape to the scene and returns its index in the
+    /// object list (the scene's own list must grow in step, see
+    /// `scene::add_object`). The shape is sized to a quarter of the first
+    /// object's longest side and centred where the ray through the screen
+    /// pixel crosses the camera-facing plane through the orbit target.
+    /// The active object does not change. None if that ray cannot reach
+    /// the plane.
+    pub fn add_shape_at_screen(
+        &mut self,
+        mesh: crate::geometry::mesh::MeshData,
+        screen_x: f32,
+        screen_y: f32,
+    ) -> Option<usize> {
+        let centre = self.screen_to_view_plane(screen_x, screen_y, self.orbit_target)?;
         let positions = &self.objects[0].mesh_data.positions;
-        if positions.is_empty() {
-            return;
+        let mut size = 1.0_f32;
+        if !positions.is_empty() {
+            let mut bounds_min = glam::Vec3::splat(f32::MAX);
+            let mut bounds_max = glam::Vec3::splat(f32::MIN);
+            for position in positions {
+                let p = glam::Vec3::from(*position);
+                bounds_min = bounds_min.min(p);
+                bounds_max = bounds_max.max(p);
+            }
+            size = (bounds_max - bounds_min).max_element() * 0.25;
         }
-        let mut bounds_min = glam::Vec3::splat(f32::MAX);
-        let mut bounds_max = glam::Vec3::splat(f32::MIN);
-        for position in positions {
-            let p = glam::Vec3::from(*position);
-            bounds_min = bounds_min.min(p);
-            bounds_max = bounds_max.max(p);
-        }
-        let size = (bounds_max - bounds_min).max_element() * 0.25;
-        let centre = glam::Vec3::new(
-            bounds_max.x + size * 1.5,
-            bounds_min.y + size * 0.5,
-            (bounds_min.z + bounds_max.z) * 0.5,
-        );
         let model = glam::Mat4::from_translation(centre)
             * glam::Mat4::from_scale(glam::Vec3::splat(size));
-        self.add_object(
-            crate::asset_import::MeshData::unit_cube(),
-            model,
-            OBJECT_COLORS[1],
-        );
+        let colour = OBJECT_COLORS[self.objects.len() % OBJECT_COLORS.len()];
+        Some(self.add_object(mesh, model, colour))
     }
+
 
     /// Adjusts the camera's orbit angles by the given deltas (radians).
     /// Pitch is clamped to avoid flipping over at the poles.
@@ -708,7 +711,7 @@ impl Renderer {
         &self.objects[self.active_object].mesh_data.indices
     }
 
-    pub fn update_vertex_weights(&self, weights: &[crate::skinning::VertexWeights]) {
+    pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeights]) {
         let object = &self.objects[self.active_object];
         let updated: Vec<Vertex> = object
             .mesh_data
@@ -819,7 +822,7 @@ impl Renderer {
     /// Works on the active object and assumes it sits at the origin
     /// (true until Section 5d adds object transforms).
     pub fn pick_inside(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
-        let ray = crate::picking::Ray::from_screen(
+        let ray = crate::render::picking::Ray::from_screen(
             screen_x,
             screen_y,
             self.width as f32,
@@ -827,7 +830,7 @@ impl Renderer {
             self.last_view_proj,
         );
         let mesh = &self.objects[self.active_object].mesh_data;
-        crate::picking::ray_mesh_midpoint(&ray, &mesh.positions, &mesh.indices)
+        crate::render::picking::ray_mesh_midpoint(&ray, &mesh.positions, &mesh.indices)
     }
 
     /// Casts a ray from a screen-space point (in pixels, matching this
@@ -836,7 +839,7 @@ impl Renderer {
     /// hits the active object's mesh, if any. Assumes the active object
     /// sits at the origin (true until Section 5d adds object transforms).
     pub fn pick(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
-        let ray = crate::picking::Ray::from_screen(
+        let ray = crate::render::picking::Ray::from_screen(
             screen_x,
             screen_y,
             self.width as f32,
@@ -844,7 +847,7 @@ impl Renderer {
             self.last_view_proj,
         );
         let mesh = &self.objects[self.active_object].mesh_data;
-        crate::picking::ray_mesh_intersection(&ray, &mesh.positions, &mesh.indices)
+        crate::render::picking::ray_mesh_intersection(&ray, &mesh.positions, &mesh.indices)
             .map(|hit| hit.point)
     }
 }

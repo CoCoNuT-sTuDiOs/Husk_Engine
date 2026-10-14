@@ -1,4 +1,4 @@
-use husk_core::pose::Pose;
+use husk_core::animation::pose::Pose;
 use husk_core::rig::Skeleton;
 
 fn main() {

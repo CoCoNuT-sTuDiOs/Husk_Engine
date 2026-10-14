@@ -1,48 +1,4 @@
-/// A single mesh's raw geometry, in Husk's own format independent of
-/// whatever file format it was loaded from.
-#[derive(Debug, Default)]
-pub struct MeshData {
-    pub positions: Vec<[f32; 3]>,
-    pub normals: Vec<[f32; 3]>,
-    pub indices: Vec<u32>,
-}
-
-impl MeshData {
-    pub fn triangle_count(&self) -> usize {
-        self.indices.len() / 3
-    }
-
-    /// A cube centred on the origin with sides of length 1 (flat shaded,
-    /// four vertices per face). TEMPORARY test geometry for Section 5b;
-    /// real shapes arrive in Section 5c.
-    pub fn unit_cube() -> MeshData {
-        // (normal, u axis, v axis), with u x v = normal.
-        let faces: [([f32; 3], [f32; 3], [f32; 3]); 6] = [
-            ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-            ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
-            ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
-            ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
-            ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
-            ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
-        ];
-        let mut mesh = MeshData::default();
-        for (normal, u, v) in faces {
-            let base = mesh.positions.len() as u32;
-            for (su, sv) in [(-0.5f32, -0.5f32), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)] {
-                mesh.positions.push([
-                    normal[0] * 0.5 + u[0] * su + v[0] * sv,
-                    normal[1] * 0.5 + u[1] * su + v[1] * sv,
-                    normal[2] * 0.5 + u[2] * su + v[2] * sv,
-                ]);
-                mesh.normals.push(normal);
-            }
-            mesh.indices
-                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-        }
-        mesh
-    }
-}
-
+use crate::geometry::mesh::MeshData;
 /// A character read from a glTF file that carries a skin: its geometry,
 /// its skeleton, and per-vertex skin weights, all in Husk's own formats.
 #[derive(Debug)]
@@ -52,7 +8,7 @@ pub struct RiggedMesh {
     /// One entry per mesh vertex, same order as `mesh.positions`. Joint
     /// indices refer to `skeleton.bones`. A vertex the file left
     /// unweighted points at the "stays put" slot instead.
-    pub weights: Vec<crate::skinning::VertexWeights>,
+    pub weights: Vec<crate::rig::skinning::VertexWeights>,
     /// Largest relative difference between the file's inverse bind
     /// matrices and the ones implied by the skeleton built here. Near
     /// zero means Husk's skinning math will match the file.
@@ -251,7 +207,7 @@ pub fn rigged_mesh_from_gltf(
     }
 
     let mut mesh = MeshData::default();
-    let mut weights: Vec<crate::skinning::VertexWeights> = Vec::new();
+    let mut weights: Vec<crate::rig::skinning::VertexWeights> = Vec::new();
 
     for node in &skinned_nodes {
         let Some(gltf_mesh) = node.mesh() else {
@@ -327,8 +283,8 @@ fn remap_vertex_weights(
     joints: &[u16; 4],
     weights: &[f32; 4],
     remap: &[usize],
-) -> Result<crate::skinning::VertexWeights, String> {
-    let mut joint_indices = [crate::geodesic::STATIC_INFLUENCE_INDEX; 4];
+) -> Result<crate::rig::skinning::VertexWeights, String> {
+    let mut joint_indices = [crate::rig::geodesic::STATIC_INFLUENCE_INDEX; 4];
     let mut normalized = [0.0f32; 4];
     let mut total = 0.0f32;
 
@@ -355,7 +311,7 @@ fn remap_vertex_weights(
         normalized[0] = 1.0;
     }
 
-    Ok(crate::skinning::VertexWeights {
+    Ok(crate::rig::skinning::VertexWeights {
         joint_indices,
         weights: normalized,
     })

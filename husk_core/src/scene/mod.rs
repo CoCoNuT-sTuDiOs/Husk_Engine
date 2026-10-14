@@ -1,5 +1,5 @@
 use crate::rig::Skeleton;
-use crate::skinning::VertexWeights;
+use crate::rig::skinning::VertexWeights;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard};
 
@@ -8,8 +8,8 @@ use std::sync::{Mutex, MutexGuard};
 pub struct Object {
     pub skeleton: Skeleton,
     pub weights: Option<Vec<VertexWeights>>,
-    pub pose: crate::pose::Pose,
-    pub timeline: crate::keyframes::Timeline,
+    pub pose: crate::animation::pose::Pose,
+    pub timeline: crate::animation::keyframes::Timeline,
 }
 
 /// One shot: a list of objects, and which one the tools act on.
@@ -70,4 +70,24 @@ pub fn active_object() -> ActiveObject {
         scene.active_object = 0;
     }
     ActiveObject { guard }
+}
+
+/// Adds an empty object to the active scene and returns its index. The
+/// renderer's list of drawn objects must grow in step with this one.
+/// Like `active_object()`, the first call creates the starting scene
+/// and its first object, so the new object never takes index 0.
+pub fn add_object() -> usize {
+    let mut guard = PROJECT.lock().unwrap();
+    if guard.scenes.is_empty() {
+        guard.scenes.push(Scene::default());
+        guard.active_scene = 0;
+    }
+    let scene_index = guard.active_scene;
+    let scene = &mut guard.scenes[scene_index];
+    if scene.objects.is_empty() {
+        scene.objects.push(Object::default());
+        scene.active_object = 0;
+    }
+    scene.objects.push(Object::default());
+    scene.objects.len() - 1
 }

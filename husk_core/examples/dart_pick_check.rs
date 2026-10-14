@@ -1,5 +1,5 @@
 use husk_core::api::simple::pick;
-use husk_core::ffi::{husk_renderer_create, husk_renderer_destroy, husk_renderer_render_frame};
+use husk_core::platform::ffi::{husk_renderer_create, husk_renderer_destroy, husk_renderer_render_frame};
 
 fn main() {
     let handle = husk_renderer_create(256, 256);

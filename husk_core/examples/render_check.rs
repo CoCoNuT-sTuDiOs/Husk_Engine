@@ -1,4 +1,4 @@
-use husk_core::ffi::{
+use husk_core::platform::ffi::{
     husk_renderer_create, husk_renderer_destroy, husk_renderer_frame_len,
     husk_renderer_frame_ptr, husk_renderer_render_frame,
 };

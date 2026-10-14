@@ -1,5 +1,5 @@
-use husk_core::asset_import::load_gltf;
-use husk_core::picking::{ray_mesh_intersection, Ray};
+use husk_core::import::mesh::load_gltf;
+use husk_core::render::picking::{ray_mesh_intersection, Ray};
 
 fn main() {
     let mesh = load_gltf("../test_assets/Box.glb", 500_000).expect("Failed to load test mesh");

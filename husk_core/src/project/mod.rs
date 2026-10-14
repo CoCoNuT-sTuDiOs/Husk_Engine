@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::geodesic::STATIC_INFLUENCE_INDEX;
-use crate::keyframes::Timeline;
+use crate::rig::geodesic::STATIC_INFLUENCE_INDEX;
+use crate::animation::keyframes::Timeline;
 use crate::rig::{Bone, Skeleton};
-use crate::skinning::VertexWeights;
+use crate::rig::skinning::VertexWeights;
 
 /// Bump this when the file layout changes, so older or newer files are
 /// refused with a clear message instead of being misread.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:husk_app/studio/editors/shapes/shapes_tray.dart';
 import 'package:husk_app/studio/editors/timeline/timeline_pane.dart';
 import 'package:husk_app/studio/editors/tools/tool_column.dart';
 import 'package:husk_app/studio/editors/viewport/viewport_pane.dart';
@@ -97,9 +98,10 @@ class _StudioShellState extends State<StudioShell> {
                     Expanded(
                       child: Column(
                         children: [
+
                           Expanded(child: viewport),
-                          TimelinePane(actions: _actions),
-                        ],
+                          const ShapesTray(),
+                          TimelinePane(actions: _actions),                        ],
                       ),
                     ),
                     SidePanel(actions: _actions),

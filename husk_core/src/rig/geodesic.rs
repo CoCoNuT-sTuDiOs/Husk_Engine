@@ -4,8 +4,8 @@ use std::collections::BinaryHeap;
 use glam::Vec3;
 
 use crate::rig::Skeleton;
-use crate::skinning::VertexWeights;
-use crate::voxel::VoxelGrid;
+use crate::rig::skinning::VertexWeights;
+use crate::rig::voxel::VoxelGrid;
 
 /// Cells along the mesh's longest side. Higher resolves thinner gaps
 /// between limbs, at the cost of time and memory.
@@ -460,7 +460,7 @@ mod tests {
 
         // Flex the knee 90 degrees: a joint's rotation swings what hangs below it.
         let quarter_turn = glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
-        let mut pose = crate::pose::Pose::rest_for(&skeleton);
+        let mut pose = crate::animation::pose::Pose::rest_for(&skeleton);
         assert!(pose.set_rotation(1, quarter_turn));
         let matrices = pose.skinning_matrices(&skeleton);
 
@@ -493,7 +493,7 @@ mod tests {
     #[ignore]
     fn weights_benchmark_against_the_files_own_weights() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/CesiumMan.glb");
-        let model = crate::rig_import::load_gltf_rig(path, usize::MAX).unwrap();
+        let model = crate::import::rigged::load_gltf_rig(path, usize::MAX).unwrap();
         let skeleton = &model.skeleton;
         let world = skeleton.world_bind_matrices();
 
@@ -600,7 +600,7 @@ mod tests {
                 .collect()
         };
         for (i, name) in names.iter().enumerate() {
-            let mut pose = crate::pose::Pose::rest_for(skeleton);
+            let mut pose = crate::animation::pose::Pose::rest_for(skeleton);
             pose.set_rotation(i, glam::Quat::from_rotation_x(0.8));
             let matrices = pose.skinning_matrices(skeleton);
             let ours_posed = skin_all(ours.as_slice(), matrices.as_slice());
@@ -627,7 +627,7 @@ mod tests {
     #[ignore]
     fn weights_breakdown_by_joint_and_without_the_static_influence() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/CesiumMan.glb");
-        let model = crate::rig_import::load_gltf_rig(path, usize::MAX).unwrap();
+        let model = crate::import::rigged::load_gltf_rig(path, usize::MAX).unwrap();
         let skeleton = &model.skeleton;
         let world = skeleton.world_bind_matrices();
         let ours = compute_geodesic_weights(
@@ -746,7 +746,7 @@ mod tests {
 
         let positions: Vec<Vec3> = model.mesh.positions.iter().map(|p| Vec3::from(*p)).collect();
         let flex_mean = |set: &[VertexWeights], joint: usize| -> f32 {
-            let mut pose = crate::pose::Pose::rest_for(skeleton);
+            let mut pose = crate::animation::pose::Pose::rest_for(skeleton);
             pose.set_rotation(joint, glam::Quat::from_rotation_x(0.8));
             let matrices = pose.skinning_matrices(skeleton);
             let mut sum = 0.0f32;
@@ -809,7 +809,7 @@ mod tests {
 
         // Flex only the ankle (the last joint) by 90 degrees.
         let quarter_turn = glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
-        let mut pose = crate::pose::Pose::rest_for(&skeleton);
+        let mut pose = crate::animation::pose::Pose::rest_for(&skeleton);
         assert!(pose.set_rotation(2, quarter_turn));
         let matrices = pose.skinning_matrices(&skeleton);
 

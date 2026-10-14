@@ -1,16 +1,11 @@
-pub mod api;
-pub mod asset_import;
-pub mod ffi;
-mod frb_generated;
-pub mod renderer;
-pub mod rig;
-pub mod picking;
-pub mod skinning;
-pub mod scene_state;
 pub mod animation;
-pub mod pose;
-pub mod voxel;
-pub mod geodesic;
-pub mod rig_import;
-pub mod keyframes;
+pub mod api;
+pub mod geometry;
+pub mod import;
+pub mod platform;
 pub mod project;
+pub mod render;
+pub mod rig;
+pub mod scene;
+
+mod frb_generated;

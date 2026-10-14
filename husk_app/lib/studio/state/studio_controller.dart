@@ -88,6 +88,16 @@ BigInt? get selectedBone => _selectedBone;
     return null;
   }
 
+  /// Adds a built-in shape ("cube", "plane", "capsule" or "torus") at
+  /// render-pixel position (x, y). Returns a message when it could not be
+  /// placed.
+  String? addShape(String name, double x, double y) {
+    final index = rust.addShape(name: name, x: x, y: y);
+    if (index == null) return 'Could not add the $name here';
+    notifyListeners();
+    return null;
+  }
+
   /// Removes the last placed bone and selects its parent. Returns a message
   /// when there is nothing to undo.
   String? undoLastBone() {

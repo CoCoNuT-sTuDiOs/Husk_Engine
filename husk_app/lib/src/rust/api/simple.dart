@@ -187,3 +187,14 @@ bool setVertexWeight({
   vertexIndex: vertexIndex,
   boneIndex: boneIndex,
 );
+
+/// Adds a built-in shape ("cube", "plane", "capsule" or "torus") to the
+/// scene at screen pixel (x, y), for example where a tray item was
+/// dropped. Returns the new object's index, or None for an unknown
+/// shape name or when the pixel cannot be placed. The active object
+/// does not change.
+BigInt? addShape({
+  required String name,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiSimpleAddShape(name: name, x: x, y: y);

@@ -60,3 +60,6 @@ impl Skeleton {
         world
     }
 }
+pub mod geodesic;
+pub mod skinning;
+pub mod voxel;

@@ -213,7 +213,7 @@ class _ViewportPaneState extends State<ViewportPane> {
         );
         // From render pixels (what the engine reports) to panel pixels.
         final scale = constraints.maxWidth / _renderSize.width;
-        return Listener(
+        final render = Listener(
           onPointerSignal: _handlePointerSignal,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -239,6 +239,20 @@ class _ViewportPaneState extends State<ViewportPane> {
               ],
             ),
           ),
+        );
+        return DragTarget<String>(
+          onAcceptWithDetails: (details) {
+            // The tray uses the pointer anchor strategy, so the drop offset
+            // is the pointer's global position. Make it local to the render
+            // area, then convert panel pixels to render pixels.
+            final box = context.findRenderObject() as RenderBox;
+            final local = box.globalToLocal(details.offset);
+            showMessage(
+              context,
+              _studio.addShape(details.data, local.dx / scale, local.dy / scale),
+            );
+          },
+          builder: (context, candidate, rejected) => render,
         );
       },
     );

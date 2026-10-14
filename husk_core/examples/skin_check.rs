@@ -1,6 +1,6 @@
-use husk_core::asset_import::load_gltf;
+use husk_core::import::mesh::load_gltf;
 use husk_core::rig::Skeleton;
-use husk_core::skinning::compute_skin_weights;
+use husk_core::rig::skinning::compute_skin_weights;
 
 fn main() {
     let mesh = load_gltf("../test_assets/Box.glb", 500_000).expect("Failed to load test mesh");
