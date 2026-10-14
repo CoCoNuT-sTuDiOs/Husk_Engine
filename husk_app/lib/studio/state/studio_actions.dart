@@ -35,6 +35,11 @@ class StudioActions {
   void undoBone(BuildContext context) =>
       showMessage(context, studio.undoLastBone());
 
+  void deleteObject(BuildContext context) =>
+      showMessage(context, studio.removeActiveObject());
+
+  void deleteObjectAt(BuildContext context, int index) =>
+      showMessage(context, studio.removeObject(index));
   void resetPose() => studio.resetPose();
 
   /// Clears the skeleton, weights and keys, after asking.

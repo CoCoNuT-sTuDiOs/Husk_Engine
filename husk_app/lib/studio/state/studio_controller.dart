@@ -98,6 +98,54 @@ BigInt? get selectedBone => _selectedBone;
     return null;
   }
 
+  /// Makes the object under render pixel (x, y) the active one, so the
+  /// bone and animation tools act on it. Returns its index, or null when
+  /// the click hit no object.
+  BigInt? selectObjectAt(double x, double y) {
+    final index = rust.selectObjectAt(x: x, y: y);
+    if (index == null) return null;
+    // A joint selected on the previous object means nothing on this one.
+    _selectedBone = null;
+    notifyListeners();
+    return index;
+  }
+
+  /// The scene's object names, in order, and the index of the active one.
+  /// The Rust core owns the list; this only reads it.
+  (List<String>, int) get objectList {
+    final (names, active) = rust.sceneObjects();
+    return (names, active.toInt());
+  }
+
+  /// Makes the object at [index] the active one.
+  void selectObject(int index) {
+    if (!rust.selectObject(index: BigInt.from(index))) return;
+    // A joint selected on the previous object means nothing on this one.
+    _selectedBone = null;
+    notifyListeners();
+  }
+
+  /// Deletes the object at [index] (see [removeActiveObject]). Returns a
+  /// message.
+  String removeObject(int index) {
+    selectObject(index);
+    return removeActiveObject();
+  }
+
+  /// Deletes the active object. The loaded model itself (object 0) cannot
+  /// be deleted. Returns a message.
+  String removeActiveObject() {
+    final index = rust.removeActiveObject();
+    if (index == null) {
+      return 'Select a shape first (the loaded model cannot be deleted)';
+    }
+    // The loaded model is the active object again; a joint selected on the
+    // deleted object means nothing now.
+    _selectedBone = null;
+    notifyListeners();
+    return 'Deleted object $index';
+  }
+
   /// Removes the last placed bone and selects its parent. Returns a message
   /// when there is nothing to undo.
   String? undoLastBone() {

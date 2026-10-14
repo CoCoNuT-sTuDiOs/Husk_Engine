@@ -67,6 +67,8 @@ let mut renderer = Box::new(Renderer::new(width, height, mesh));
         active.weights = Some(vertex_weights);
 
     }
+    // The outliner calls the loaded model "Model".
+    crate::scene::active_object().name = String::from("Model");
     let raw = Box::into_raw(renderer);
 
     *ACTIVE_RENDERER.lock().unwrap() = Some(raw as usize);

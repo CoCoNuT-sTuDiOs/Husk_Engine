@@ -454,7 +454,7 @@ pub fn load_project(path: String) -> (bool, String) {
     );
     {
         let mut active = crate::scene::active_object();
-        let crate::scene::Object { skeleton, pose, weights, timeline } = &mut *active;
+        let crate::scene::Object { skeleton, pose, weights, timeline, .. } = &mut *active;
         *pose = crate::animation::pose::Pose::rest_for(&project.skeleton);
         *skeleton = project.skeleton;
         *weights = project.weights;
@@ -500,7 +500,14 @@ pub fn bone_parents() -> Vec<Option<usize>> {
 /// start placing bones over from a clean state.
 #[flutter_rust_bridge::frb(sync)]
 pub fn reset_skeleton() {
-    *crate::scene::active_object() = crate::scene::Object::default();
+    {
+        let mut active = crate::scene::active_object();
+        let name = std::mem::take(&mut active.name);
+        *active = crate::scene::Object {
+            name,
+            ..crate::scene::Object::default()
+        };
+    }
     crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
 }
 /// Orbits the camera by the given angle deltas (radians) around its
@@ -543,13 +550,72 @@ pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
         renderer.add_shape_at_screen(mesh, x as f32, y as f32)
     })
     .flatten()?;
-    let scene_index = crate::scene::add_object();
+    let mut letters = name.chars();
+    let label = match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect::<String>(),
+        None => String::new(),
+    };
+    let scene_index = crate::scene::add_object(&label);
     if scene_index != render_index {
         eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
     }
     Some(render_index)
+}
+
+/// Makes the object under screen pixel (x, y) the active one, so the
+/// bone and animation tools act on it. Returns its index, or None when
+/// the pixel shows no object (the active object stays as it was).
+#[flutter_rust_bridge::frb(sync)]
+pub fn select_object_at(x: f64, y: f64) -> Option<usize> {
+    let index = crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.pick_object(x as f32, y as f32)
+    })
+    .flatten()?;
+    // The scene checks the index first, so a mismatch changes neither list.
+    if !crate::scene::set_active_object(index) {
+        eprintln!("Husk: the renderer picked object {index} but the scene has no such object");
+        return None;
+    }
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_active_object(index));
+    Some(index)
+}
+
+/// Deletes the active object from the scene. The loaded model itself
+/// (object 0) cannot be deleted. Returns the index that was deleted, or
+/// None if nothing was. Objects after it move down one place, and the
+/// loaded model becomes the active object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn remove_active_object() -> Option<usize> {
+    let index = crate::scene::remove_active_object()?;
+    let removed = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.remove_object(index)
+    });
+    if removed != Some(true) {
+        eprintln!(
+            "Husk: the scene removed object {index} but the renderer did not; the two lists are out of step"
+        );
+    }
+    Some(index)
+}
+
+/// The names of the scene's objects, in order, and the index of the
+/// active one.
+#[flutter_rust_bridge::frb(sync)]
+pub fn scene_objects() -> (Vec<String>, usize) {
+    crate::scene::object_list()
+}
+
+/// Makes the object at `index` the active one (a click in the outliner).
+/// Returns false, changing nothing, if there is no such object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn select_object(index: usize) -> bool {
+    if !crate::scene::set_active_object(index) {
+        return false;
+    }
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_active_object(index));
+    true
 }
 
 #[flutter_rust_bridge::frb(init)]

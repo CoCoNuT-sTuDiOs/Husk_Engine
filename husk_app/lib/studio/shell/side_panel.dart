@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:husk_app/studio/editors/outliner/outliner_panel.dart';
 import 'package:husk_app/studio/editors/properties/properties_panel.dart';
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/ui/husk_theme.dart';
@@ -22,14 +23,7 @@ class SidePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const PanelHeader(title: 'Outliner'),
-          const Expanded(
-            child: Center(
-              child: Text(
-                'Objects arrive in Section 5c',
-                style: HuskText.readout,
-              ),
-            ),
-          ),
+           Expanded(child: OutlinerPanel(actions: actions)),
           const PanelHeader(title: 'Properties'),
           Expanded(
             flex: 2,

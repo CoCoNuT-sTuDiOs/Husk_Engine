@@ -198,3 +198,26 @@ BigInt? addShape({
   required double x,
   required double y,
 }) => RustLib.instance.api.crateApiSimpleAddShape(name: name, x: x, y: y);
+
+/// Makes the object under screen pixel (x, y) the active one, so the
+/// bone and animation tools act on it. Returns its index, or None when
+/// the pixel shows no object (the active object stays as it was).
+BigInt? selectObjectAt({required double x, required double y}) =>
+    RustLib.instance.api.crateApiSimpleSelectObjectAt(x: x, y: y);
+
+/// Deletes the active object from the scene. The loaded model itself
+/// (object 0) cannot be deleted. Returns the index that was deleted, or
+/// None if nothing was. Objects after it move down one place, and the
+/// loaded model becomes the active object.
+BigInt? removeActiveObject() =>
+    RustLib.instance.api.crateApiSimpleRemoveActiveObject();
+
+/// The names of the scene's objects, in order, and the index of the
+/// active one.
+(List<String>, BigInt) sceneObjects() =>
+    RustLib.instance.api.crateApiSimpleSceneObjects();
+
+/// Makes the object at `index` the active one (a click in the outliner).
+/// Returns false, changing nothing, if there is no such object.
+bool selectObject({required BigInt index}) =>
+    RustLib.instance.api.crateApiSimpleSelectObject(index: index);

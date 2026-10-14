@@ -54,6 +54,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
   List<(double, double)?> dco_decode_list_opt_box_autoadd_record_f_32_f_32(
     dynamic raw,
   );
@@ -99,6 +102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (double, double, double) dco_decode_record_f_32_f_32_f_32(dynamic raw);
+
+  @protected
+  (List<String>, BigInt) dco_decode_record_list_string_usize(dynamic raw);
 
   @protected
   (BigInt, double) dco_decode_record_usize_f_32(dynamic raw);
@@ -157,6 +163,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
   List<(double, double)?> sse_decode_list_opt_box_autoadd_record_f_32_f_32(
     SseDeserializer deserializer,
   );
@@ -212,6 +221,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (double, double, double) sse_decode_record_f_32_f_32_f_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  (List<String>, BigInt) sse_decode_record_list_string_usize(
     SseDeserializer deserializer,
   );
 
@@ -276,6 +290,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_opt_box_autoadd_record_f_32_f_32(
@@ -352,6 +369,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_record_f_32_f_32_f_32(
     (double, double, double) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_record_list_string_usize(
+    (List<String>, BigInt) self,
     SseSerializer serializer,
   );
 

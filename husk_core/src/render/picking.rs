@@ -96,8 +96,31 @@ pub fn ray_mesh_midpoint(
     Some(ray.origin + ray.direction * ((near_t + far_t) * 0.5))
 }
 
+pub fn pick_nearest(
+    ray: &Ray,
+    placed: &[(glam::Mat4, &[[f32; 3]], &[u32])],
+) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (index, (model, positions, indices)) in placed.iter().enumerate() {
+        let inverse = model.inverse();
+        // Moving both the origin and the direction into the mesh's own
+        // space keeps t the same along the ray, so hits on different
+        // meshes can be compared directly.
+        let local = Ray {
+            origin: inverse.transform_point3(ray.origin),
+            direction: inverse.transform_vector3(ray.direction),
+        };
+        if let Some(hit) = ray_mesh_intersection(&local, positions, indices) {
+            if best.map_or(true, |(_, nearest)| hit.distance < nearest) {
+                best = Some((index, hit.distance));
+            }
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
 fn ray_triangle_intersection(ray: &Ray, v0: glam::Vec3, v1: glam::Vec3, v2: glam::Vec3) -> Option<f32> {
-    const EPSILON: f32 = 1e-6;
+const EPSILON: f32 = 1e-6;
 
     let edge1 = v1 - v0;
     let edge2 = v2 - v0;
@@ -157,9 +180,54 @@ mod tests {
         }
     }
 
+    fn one_quad() -> (Vec<[f32; 3]>, Vec<u32>) {
+        let (positions, indices) = two_parallel_quads();
+        (positions, indices[..6].to_vec())
+    }
+
+    #[test]
+    fn pick_nearest_chooses_the_closer_placed_mesh() {
+        let (positions, indices) = one_quad();
+        // The quad sits at z = 1 as built; moved by -3 it sits at z = -2.
+        let at_z1 = glam::Mat4::IDENTITY;
+        let at_z_minus2 = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -3.0));
+        let placed = [
+            (at_z1, positions.as_slice(), indices.as_slice()),
+            (at_z_minus2, positions.as_slice(), indices.as_slice()),
+        ];
+        assert_eq!(pick_nearest(&ray_down_z(), &placed), Some(0));
+        // The same two meshes in the other order: the closer one is now entry 1.
+        let swapped = [placed[1], placed[0]];
+        assert_eq!(pick_nearest(&ray_down_z(), &swapped), Some(1));
+    }
+
+    #[test]
+    fn pick_nearest_respects_scale_and_translation() {
+        let (positions, indices) = one_quad();
+        let behind = glam::Mat4::IDENTITY; // quad at z = 1
+        // Scaled to half size and moved to z = 2 + 0.5 = 2.5: closer to the
+        // ray's start at z = 5, and still wide enough to catch (0.3, 0.2).
+        let in_front = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 2.0))
+            * glam::Mat4::from_scale(glam::Vec3::splat(0.5));
+        let placed = [
+            (behind, positions.as_slice(), indices.as_slice()),
+            (in_front, positions.as_slice(), indices.as_slice()),
+        ];
+        assert_eq!(pick_nearest(&ray_down_z(), &placed), Some(1));
+    }
+
+    #[test]
+    fn pick_nearest_returns_none_when_every_mesh_is_missed() {
+        let (positions, indices) = one_quad();
+        let far_left = glam::Mat4::from_translation(glam::Vec3::new(-10.0, 0.0, 0.0));
+        let placed = [(far_left, positions.as_slice(), indices.as_slice())];
+        assert!(pick_nearest(&ray_down_z(), &placed).is_none());
+        assert!(pick_nearest(&ray_down_z(), &[]).is_none());
+    }
+
     #[test]
     fn midpoint_lands_between_front_and_back_surface() {
-        let (positions, indices) = two_parallel_quads();
+    let (positions, indices) = two_parallel_quads();
         let mid = ray_mesh_midpoint(&ray_down_z(), &positions, &indices).unwrap();
         assert!((mid - glam::Vec3::new(0.3, 0.2, 0.0)).length() < 1e-4);
     }

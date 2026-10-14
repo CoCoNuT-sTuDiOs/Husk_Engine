@@ -137,9 +137,12 @@ class _ViewportPaneState extends State<ViewportPane> {
       _viewport.zoom(1 / 1.08); // zoom in
       return true;
     }
+    if (key == LogicalKeyboardKey.delete && event is KeyDownEvent) {
+      widget.actions.deleteObject(context);
+      return true;
+    }
     return false;
   }
-
   void _handlePointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent) {
       // Scrolling down moves the camera away, scrolling up brings it closer.
@@ -164,6 +167,14 @@ class _ViewportPaneState extends State<ViewportPane> {
       );
     } else {
       _studio.selectBone(null);
+      if (_studio.tool == StudioTool.select) {
+        final picked = _studio.selectObjectAt(
+          details.localPosition.dx / scale,
+          details.localPosition.dy / scale,
+        );
+        // TEMPORARY feedback until the outliner shows the selection.
+        if (picked != null) showMessage(context, 'Selected object $picked');
+      }
     }
   }
 

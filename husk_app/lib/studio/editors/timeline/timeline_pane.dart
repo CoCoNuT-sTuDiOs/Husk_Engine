@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:husk_app/studio/editors/timeline/timeline_track.dart';
 import 'package:husk_app/studio/state/studio_actions.dart';
-import 'package:husk_app/studio/state/timeline_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/widgets/icon_action.dart';
 import 'package:phosphor_icons/phosphor_icons.dart';

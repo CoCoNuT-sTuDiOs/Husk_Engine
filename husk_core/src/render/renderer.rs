@@ -816,11 +816,53 @@ impl Renderer {
         Some(near + direction * t)
     }
 
-    /// Like `pick`, but returns the point halfway through the mesh along
-    /// the ray (between where it enters and where it last exits) instead
-    /// of the front surface, so bones land inside a limb, not on its skin.
-    /// Works on the active object and assumes it sits at the origin
-    /// (true until Section 5d adds object transforms).
+    /// The index of the object under screen pixel (x, y), using the camera
+    /// from the last rendered frame and each object's own placement. The
+    /// nearest object along the ray wins; None if the pixel shows empty
+    /// space. Tests the objects' rest shapes, not their posed ones.
+    pub fn pick_object(&self, screen_x: f32, screen_y: f32) -> Option<usize> {
+        let ray = crate::render::picking::Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            self.last_view_proj,
+        );
+        let placed: Vec<(glam::Mat4, &[[f32; 3]], &[u32])> = self
+            .objects
+            .iter()
+            .map(|object| {
+                (
+                    object.model,
+                    object.mesh_data.positions.as_slice(),
+                    object.mesh_data.indices.as_slice(),
+                )
+            })
+            .collect();
+        crate::render::picking::pick_nearest(&ray, &placed)
+    }
+
+    /// Makes `index` the object the tools act on. False, changing
+    /// nothing, if there is no such object.
+    pub fn set_active_object(&mut self, index: usize) -> bool {
+        if index >= self.objects.len() {
+            return false;
+        }
+        self.active_object = index;
+        true
+    }
+
+    /// Removes the object at `index` and frees its GPU buffers. Follows
+    /// the same rules as `Scene::remove_object`: object 0 and unknown
+    /// indices are refused (false, nothing changes).
+    pub fn remove_object(&mut self, index: usize) -> bool {
+        if index == 0 || index >= self.objects.len() {
+            return false;
+        }
+        self.objects.remove(index);
+        self.active_object = crate::scene::active_after_removal(self.active_object, index);
+        true
+    }
     pub fn pick_inside(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
         let ray = crate::render::picking::Ray::from_screen(
             screen_x,
