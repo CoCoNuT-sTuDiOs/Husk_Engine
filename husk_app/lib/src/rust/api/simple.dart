@@ -221,3 +221,13 @@ BigInt? removeActiveObject() =>
 /// Returns false, changing nothing, if there is no such object.
 bool selectObject({required BigInt index}) =>
     RustLib.instance.api.crateApiSimpleSelectObject(index: index);
+
+/// The names of the built-in shapes, in the order the tray shows them.
+List<String> shapeNames() => RustLib.instance.api.crateApiSimpleShapeNames();
+
+/// A picture of one built-in shape for the tray: `size` x `size` RGBA
+/// pixels with a transparent background. It draws on its own throwaway
+/// renderer, so it is not marked sync: it runs off the UI thread and
+/// takes a moment. None for an unknown shape name.
+Future<Uint8List?> shapePreview({required String name, required int size}) =>
+    RustLib.instance.api.crateApiSimpleShapePreview(name: name, size: size);

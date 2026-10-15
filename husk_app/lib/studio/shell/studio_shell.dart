@@ -100,7 +100,7 @@ class _StudioShellState extends State<StudioShell> {
                         children: [
 
                           Expanded(child: viewport),
-                          const ShapesTray(),
+                           ShapesTray(studio: _studio),
                           TimelinePane(actions: _actions),                        ],
                       ),
                     ),

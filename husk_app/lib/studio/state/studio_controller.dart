@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:husk_app/src/rust/api/simple.dart' as rust;
 
@@ -88,9 +90,14 @@ BigInt? get selectedBone => _selectedBone;
     return null;
   }
 
-  /// Adds a built-in shape ("cube", "plane", "capsule" or "torus") at
-  /// render-pixel position (x, y). Returns a message when it could not be
-  /// placed.
+  /// The built-in shapes' names, in the order the tray shows them. The
+  /// Rust core owns the list.
+  List<String> get shapeNames => rust.shapeNames();
+
+  Future<Uint8List?> shapePreview(String name, int size) =>
+      rust.shapePreview(name: name, size: size);
+
+
   String? addShape(String name, double x, double y) {
     final index = rust.addShape(name: name, x: x, y: y);
     if (index == null) return 'Could not add the $name here';
