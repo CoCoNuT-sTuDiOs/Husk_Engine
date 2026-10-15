@@ -503,10 +503,13 @@ pub fn reset_skeleton() {
     {
         let mut active = crate::scene::active_object();
         let name = std::mem::take(&mut active.name);
+        let transform = active.transform;
         *active = crate::scene::Object {
             name,
+            transform,
             ..crate::scene::Object::default()
         };
+
     }
     crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
 }
@@ -546,8 +549,8 @@ pub fn set_vertex_weight(vertex_index: usize, bone_index: usize) -> bool {
 #[flutter_rust_bridge::frb(sync)]
 pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
     let mesh = crate::geometry::shapes::by_name(&name)?;
-    let render_index = crate::platform::ffi::with_active_renderer_mut(|renderer| {
-        renderer.add_shape_at_screen(mesh, x as f32, y as f32)
+    let (render_index, model) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+    renderer.add_shape_at_screen(mesh, x as f32, y as f32)
     })
     .flatten()?;
     let mut letters = name.chars();
@@ -555,7 +558,10 @@ pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
         Some(first) => first.to_uppercase().chain(letters).collect::<String>(),
         None => String::new(),
     };
-    let scene_index = crate::scene::add_object(&label);
+    let scene_index = crate::scene::add_object(
+        &label,
+        crate::scene::transform::Transform::from_matrix(model),
+    );
     if scene_index != render_index {
         eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
@@ -616,6 +622,27 @@ pub fn select_object(index: usize) -> bool {
     }
     crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_active_object(index));
     true
+}
+
+/// The names of the built-in shapes, in the order the tray shows them.
+#[flutter_rust_bridge::frb(sync)]
+pub fn shape_names() -> Vec<String> {
+    crate::geometry::shapes::SHAPE_NAMES
+        .iter()
+        .map(|name| name.to_string())
+        .collect()
+}
+
+/// A picture of one built-in shape for the tray: `size` x `size` RGBA
+/// pixels with a transparent background. It draws on its own throwaway
+/// renderer, so it is not marked sync: it runs off the UI thread and
+/// takes a moment. None for an unknown shape name.
+pub fn shape_preview(name: String, size: u32) -> Option<Vec<u8>> {
+    let mesh = crate::geometry::shapes::by_name(&name)?;
+    Some(crate::render::renderer::Renderer::render_preview(
+        mesh,
+        size.clamp(16, 512),
+    ))
 }
 
 #[flutter_rust_bridge::frb(init)]

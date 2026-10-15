@@ -1,3 +1,5 @@
+pub mod transform;
+
 use crate::rig::Skeleton;
 use crate::rig::skinning::VertexWeights;
 use std::ops::{Deref, DerefMut};
@@ -7,7 +9,10 @@ use std::sync::{Mutex, MutexGuard};
 #[derive(Default)]
 pub struct Object {
     /// What the outliner calls it.
-    pub name: String,
+        pub name: String,
+    /// Where the object sits in the scene. The scene owns this; the
+    /// renderer's matrix is only the GPU-side copy of it.
+    pub transform: transform::Transform,
     pub skeleton: Skeleton,
     pub weights: Option<Vec<VertexWeights>>,
     pub pose: crate::animation::pose::Pose,
@@ -102,7 +107,7 @@ pub fn active_object() -> ActiveObject {
     }
     ActiveObject { guard }
 }
-pub fn add_object(base: &str) -> usize {
+pub fn add_object(base: &str, transform: transform::Transform) -> usize {
     let mut guard = PROJECT.lock().unwrap();
     if guard.scenes.is_empty() {
         guard.scenes.push(Scene::default());
@@ -116,7 +121,8 @@ pub fn add_object(base: &str) -> usize {
     }
     let index = scene.objects.len();
     scene.objects.push(Object {
-        name: format!("{base} {index}"),
+    name: format!("{base} {index}"),
+        transform,
         ..Object::default()
     });
     index

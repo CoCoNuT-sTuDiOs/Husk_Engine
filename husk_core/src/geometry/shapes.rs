@@ -1,5 +1,5 @@
 use super::mesh::MeshData;
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 /// A flat square lying in the XZ plane, centred on the origin, facing up
 /// (+Y), with sides of length `size`.
@@ -101,15 +101,58 @@ pub fn torus(
     mesh
 }
 
-/// Looks up a built-in shape by name ("cube", "plane", "capsule" or
-/// "torus", any letter case). Each is about one unit across, except the
-/// plane, which is four. None for an unknown name.
+
+/// A sphere centred on the origin. `segments` slices go around the Y
+/// axis and `rings` bands run from pole to pole.
+pub fn sphere(radius: f32, segments: u32, rings: u32) -> MeshData {
+    let segments = segments.max(3);
+    let rings = rings.max(2);
+    let row_len = segments + 1;
+    let mut mesh = MeshData::default();
+
+    for step in 0..=rings {
+        let theta = step as f32 / rings as f32 * PI;
+        for s in 0..=segments {
+            let phi = s as f32 / segments as f32 * TAU;
+            let n = [
+                theta.sin() * phi.cos(),
+                theta.cos(),
+                theta.sin() * phi.sin(),
+            ];
+            mesh.positions
+                .push([radius * n[0], radius * n[1], radius * n[2]]);
+            mesh.normals.push(n);
+        }
+    }
+
+    for row in 0..rings {
+        for s in 0..segments {
+            let a = row * row_len + s;
+            let b = a + 1;
+            let c = a + row_len;
+            let d = c + 1;
+            mesh.indices.extend_from_slice(&[a, b, d, a, d, c]);
+        }
+    }
+    mesh
+}
+
+/// The built-in shapes, in the order the tray shows them. `by_name`
+/// understands exactly these (any letter case). The tray asks the engine
+/// for this list, so a new shape only has to be added here and in
+/// `by_name`.
+pub const SHAPE_NAMES: [&str; 5] = ["cube", "sphere", "capsule", "torus", "plane"];
+
+/// Looks up a built-in shape by name (see `SHAPE_NAMES`, any letter
+/// case). Each is about one unit across, except the plane, which is
+/// four. None for an unknown name.
 pub fn by_name(name: &str) -> Option<MeshData> {
     match name.to_lowercase().as_str() {
         "cube" => Some(MeshData::unit_cube()),
-        "plane" => Some(plane(4.0)),
+        "sphere" => Some(sphere(0.5, 32, 16)),
         "capsule" => Some(capsule(0.25, 0.5, 24, 8)),
         "torus" => Some(torus(0.4, 0.1, 32, 16)),
+        "plane" => Some(plane(4.0)),
         _ => None,
     }
 }
@@ -158,13 +201,28 @@ mod tests {
 
     #[test]
     fn by_name_finds_the_four_shapes_and_rejects_others() {
-        for name in ["cube", "plane", "capsule", "torus", "Torus", "CUBE"] {
+        for name in SHAPE_NAMES.iter().copied().chain(["Torus", "CUBE"]) {
             let mesh = by_name(name).unwrap_or_else(|| panic!("{name} not found"));
             assert_well_formed(&mesh);
             assert!(mesh.triangle_count() > 0);
         }
         assert!(by_name("teapot").is_none());
         assert!(by_name("").is_none());
+    }
+    #[test]
+    fn sphere_has_the_right_size_and_counts() {
+        let (radius, segments, rings) = (0.5, 24u32, 12u32);
+        let mesh = sphere(radius, segments, rings);
+        assert_well_formed(&mesh);
+        assert_outward_winding(&mesh);
+        assert_eq!(mesh.positions.len() as u32, (rings + 1) * (segments + 1));
+        assert_eq!(mesh.indices.len() as u32, rings * segments * 2 * 3);
+        for axis in 0..3 {
+            assert!((extent(&mesh, axis) - 2.0 * radius).abs() < 1e-4);
+        }
+        for p in &mesh.positions {
+            assert!((Vec3::from(*p).length() - radius).abs() < 1e-5);
+        }
     }
 
     #[test]

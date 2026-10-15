@@ -400,6 +400,35 @@ impl Renderer {
         }
     }
 
+    /// Draws one mesh on its own, fitted to the frame, at `size` x `size`
+    /// pixels, and returns the RGBA pixels with the background made
+    /// transparent. The shape tray uses it for its previews. It builds a
+    /// throwaway renderer (its own GPU device), so call it off the UI
+    /// thread and never once per frame.
+    pub fn render_preview(mesh: crate::geometry::mesh::MeshData, size: u32) -> Vec<u8> {
+        // A light neutral grey-blue, so the shape reads on the dark panel.
+        const PREVIEW_COLOR: [f32; 4] = [0.70, 0.72, 0.76, 1.0];
+        let mut renderer = Renderer::new(size, size, mesh);
+        renderer.objects[0].base_color = PREVIEW_COLOR;
+        // A three-quarter view from slightly above.
+        renderer.orbit(0.6, 0.15);
+        renderer.render_frame();
+        let mut pixels = renderer.last_frame.clone();
+        // The corner pixel is always background (the camera frames the
+        // shape with a margin), and the renderer does not blend edges, so
+        // every pixel of exactly that colour is background: make it
+        // transparent.
+        if pixels.len() >= 4 {
+            let background = [pixels[0], pixels[1], pixels[2], pixels[3]];
+            for pixel in pixels.chunks_exact_mut(4) {
+                if pixel[..] == background[..] {
+                    pixel.copy_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+        pixels
+    }
+
     /// Adds another object to the scene and returns its index. Section 5c
     /// will use this for the add-model action.
     pub fn add_object(
@@ -425,14 +454,16 @@ impl Renderer {
     /// `scene::add_object`). The shape is sized to a quarter of the first
     /// object's longest side and centred where the ray through the screen
     /// pixel crosses the camera-facing plane through the orbit target.
-    /// The active object does not change. None if that ray cannot reach
-    /// the plane.
+    /// The active object does not change. Returns the index together with
+    /// the placement matrix the shape was given, which the caller stores
+    /// as the scene object's transform. None if that ray cannot reach the
+    /// plane.
     pub fn add_shape_at_screen(
         &mut self,
         mesh: crate::geometry::mesh::MeshData,
         screen_x: f32,
         screen_y: f32,
-    ) -> Option<usize> {
+            ) -> Option<(usize, glam::Mat4)> {
         let centre = self.screen_to_view_plane(screen_x, screen_y, self.orbit_target)?;
         let positions = &self.objects[0].mesh_data.positions;
         let mut size = 1.0_f32;
@@ -449,7 +480,8 @@ impl Renderer {
         let model = glam::Mat4::from_translation(centre)
             * glam::Mat4::from_scale(glam::Vec3::splat(size));
         let colour = OBJECT_COLORS[self.objects.len() % OBJECT_COLORS.len()];
-        Some(self.add_object(mesh, model, colour))
+        let index = self.add_object(mesh, model, colour);
+        Some((index, model))
     }
 
 
