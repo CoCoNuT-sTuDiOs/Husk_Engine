@@ -39,7 +39,20 @@ impl Scene {
         self.active_object = active_after_removal(self.active_object, index);
         true
     }
+
+    /// Sets the transform of the object at `index`. False, changing
+    /// nothing, for an unknown index.
+    pub fn set_transform(&mut self, index: usize, transform: transform::Transform) -> bool {
+        match self.objects.get_mut(index) {
+    Some(object) => {
+                object.transform = transform;
+                true
+            }
+            None => false,
+        }
+    }
 }
+
 
 /// Which index is active once `removed` has been taken out of the list:
 /// objects after it shift down by one, and if the active object itself
@@ -157,6 +170,35 @@ pub fn remove_active_object() -> Option<usize> {
     }
 }
 
+/// The active object's index and transform.
+pub fn active_transform() -> (usize, transform::Transform) {
+    let guard = PROJECT.lock().unwrap();
+    match guard.scenes.get(guard.active_scene) {
+        Some(scene) => {
+            let transform = scene
+                .objects
+                .get(scene.active_object)
+                .map_or_else(transform::Transform::default, |object| object.transform);
+            (scene.active_object, transform)
+        }
+        None => (0, transform::Transform::default()),
+    }
+}
+
+/// Sets the active object's transform (see `Scene::set_transform` for
+/// what is refused). Returns the index of the object that was changed.
+pub fn set_active_transform(transform: transform::Transform) -> Option<usize> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    let index = scene.active_object;
+    if scene.set_transform(index, transform) {
+        Some(index)
+    } else {
+        None
+    }
+}
+
 /// The names of the active scene's objects, in order, and the index of
 /// the active one.
 pub fn object_list() -> (Vec<String>, usize) {
@@ -206,7 +248,21 @@ let mut scene = Scene::default();
         assert_eq!(scene.objects.len(), 3);
         assert_eq!(scene.active_object, 0);
     }
-
+    #[test]
+    fn set_transform_moves_any_object_and_rejects_unknown_ones() {
+        let mut scene = scene_with(3, 1);
+        let mut moved = transform::Transform::default();
+        moved.translation = glam::Vec3::new(1.0, 2.0, 3.0);
+        assert!(scene.set_transform(2, moved));
+        assert_eq!(scene.objects[2].transform, moved);
+        // The loaded model moves like any other object.
+        assert!(scene.set_transform(0, moved));
+        assert_eq!(scene.objects[0].transform, moved);
+        // The others stay where they were.
+        assert_eq!(scene.objects[1].transform, transform::Transform::default());
+        assert!(!scene.set_transform(9, moved));
+    }
+    
     #[test]
     fn the_loaded_model_and_bad_indices_cannot_be_removed() {
         let mut scene = scene_with(3, 1);

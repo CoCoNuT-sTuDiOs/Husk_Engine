@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:husk_app/studio/editors/viewport/gizmo_overlay.dart';
 import 'package:husk_app/studio/editors/viewport/skeleton_overlay.dart';
 import 'package:husk_app/studio/editors/viewport/viewport_tool_strip.dart';
 import 'package:husk_app/studio/state/studio_actions.dart';
@@ -11,6 +12,7 @@ import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
+import 'package:husk_app/ui/typing.dart';
 
 // The renderer never draws more than this many pixels on its long side.
 const double _maxRenderSide = 1920;
@@ -47,8 +49,16 @@ class _ViewportPaneState extends State<ViewportPane> {
   BigInt? _draggedJoint;
   bool _dragMovesCharacter = false;
 
-  // Ticks ~30 times a second so the skeleton overlay repaints as the
-  // camera orbits or bones move. Only the overlay listens to it.
+  // The gizmo arrow being dragged with the Move object tool (0 = X, 1 = Y,
+  // 2 = Z; null when the drag does something else), where the object was
+  // when the drag began, and how far along the arrow the cursor was then.
+  int? _gizmoAxis;
+  (double, double, double) _gizmoStart = (0, 0, 0);
+  double _gizmoStartParam = 0;
+
+  // The arrow to light up: the one under the cursor, or the one dragged.
+  final ValueNotifier<int?> _gizmoHighlight = ValueNotifier<int?>(null);
+
   final ValueNotifier<int> _overlayTick = ValueNotifier<int>(0);
   Timer? _overlayTimer;
 
@@ -69,6 +79,7 @@ class _ViewportPaneState extends State<ViewportPane> {
     _overlayTimer?.cancel();
     _resizeTimer?.cancel();
     _overlayTick.dispose();
+    _gizmoHighlight.dispose();
     super.dispose();
   }
 
@@ -125,6 +136,8 @@ class _ViewportPaneState extends State<ViewportPane> {
 
   bool _handleKey(KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    // A text box has the keys: Delete, - and = belong to it.
+    if (isTyping()) return false;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.minus ||
         key == LogicalKeyboardKey.numpadSubtract) {
@@ -167,7 +180,8 @@ class _ViewportPaneState extends State<ViewportPane> {
       );
     } else {
       _studio.selectBone(null);
-      if (_studio.tool == StudioTool.select) {
+      if (_studio.tool == StudioTool.select ||
+          _studio.tool == StudioTool.moveObject) {
         final picked = _studio.selectObjectAt(
           details.localPosition.dx / scale,
           details.localPosition.dy / scale,
@@ -181,6 +195,7 @@ class _ViewportPaneState extends State<ViewportPane> {
   void _handlePanStart(DragStartDetails details, double scale) {
     _draggedJoint = null;
     _dragMovesCharacter = false;
+    _gizmoAxis = null;
     switch (_studio.tool) {
       case StudioTool.move:
         _dragMovesCharacter = true;
@@ -192,12 +207,21 @@ class _ViewportPaneState extends State<ViewportPane> {
         _dragMovesCharacter = joint != null && _viewport.isRoot(joint);
       case StudioTool.placeBones:
         break; // Dragging orbits the camera.
+      case StudioTool.moveObject:
+        // A drag that starts on an arrow moves the object; anywhere else
+        // it orbits the camera.
+        _beginGizmoDrag(details.localPosition, scale);
     }
+
   }
 
   void _handlePanUpdate(DragUpdateDetails details, double scale) {
     final x = details.localPosition.dx / scale;
     final y = details.localPosition.dy / scale;
+    if (_gizmoAxis != null) {
+      _updateGizmoDrag(x, y);
+      return;
+    }
     if (_dragMovesCharacter) {
       _viewport.moveCharacter(x, y);
       return;
@@ -215,6 +239,61 @@ class _ViewportPaneState extends State<ViewportPane> {
     _viewport.dragJoint(joint, x, y, ik: _studio.ikMode);
   }
 
+  /// Starts a drag on a gizmo arrow if the pointer is on one; otherwise
+  /// the drag orbits the camera as usual.
+  void _beginGizmoDrag(Offset pointer, double scale) {
+    final position = _studio.activeTransform.position;
+    final axis = _viewport.gizmoAxisAt(pointer, position, scale, kGizmoLength);
+    if (axis == null) return;
+    final param = _viewport.axisParam(
+      position,
+      axis,
+      pointer.dx / scale,
+      pointer.dy / scale,
+    );
+    if (param == null) return;
+    _gizmoAxis = axis;
+    _gizmoStart = position;
+    _gizmoStartParam = param;
+    _gizmoHighlight.value = axis;
+  }
+
+  /// Moves the active object along the dragged arrow so the point that was
+  /// grabbed stays under the cursor.
+  void _updateGizmoDrag(double x, double y) {
+    final axis = _gizmoAxis;
+    if (axis == null) return;
+    final param = _viewport.axisParam(_gizmoStart, axis, x, y);
+    if (param == null) return;
+    final (dx, dy, dz) = ViewportController.gizmoAxisDirections[axis];
+    final along = param - _gizmoStartParam;
+    final (sx, sy, sz) = _gizmoStart;
+    _studio.setActivePosition(
+      (sx + dx * along, sy + dy * along, sz + dz * along),
+    );
+  }
+
+  void _endDrag() {
+    _draggedJoint = null;
+    _gizmoAxis = null;
+    _gizmoHighlight.value = null;
+  }
+
+  /// Lights up the gizmo arrow under the cursor while nothing is dragged.
+  void _updateHover(Offset pointer, double scale) {
+    if (_gizmoAxis != null) return;
+    if (_studio.tool != StudioTool.moveObject) {
+      _gizmoHighlight.value = null;
+      return;
+    }
+    _gizmoHighlight.value = _viewport.gizmoAxisAt(
+      pointer,
+      _studio.activeTransform.position,
+      scale,
+      kGizmoLength,
+    );
+  }
+
   Widget _buildRender(BuildContext context, int textureId) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -226,13 +305,14 @@ class _ViewportPaneState extends State<ViewportPane> {
         final scale = constraints.maxWidth / _renderSize.width;
         final render = Listener(
           onPointerSignal: _handlePointerSignal,
+          onPointerHover: (event) => _updateHover(event.localPosition, scale),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapUp: (details) => _handleTap(details, scale),
             onPanStart: (details) => _handlePanStart(details, scale),
             onPanUpdate: (details) => _handlePanUpdate(details, scale),
-            onPanEnd: (_) => _draggedJoint = null,
-            onPanCancel: () => _draggedJoint = null,
+            onPanEnd: (_) => _endDrag(),
+            onPanCancel: _endDrag,
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -244,6 +324,21 @@ class _ViewportPaneState extends State<ViewportPane> {
                       studio: _studio,
                       renderWidth: _renderSize.width,
                       repaint: Listenable.merge([_overlayTick, _studio]),
+                    ),
+                  ),
+                ),
+                IgnorePointer(
+                  child: CustomPaint(
+                    painter: GizmoOverlayPainter(
+                      viewport: _viewport,
+                      studio: _studio,
+                      renderWidth: _renderSize.width,
+                      highlighted: _gizmoHighlight,
+                      repaint: Listenable.merge([
+                        _overlayTick,
+                        _studio,
+                        _gizmoHighlight,
+                      ]),
                     ),
                   ),
                 ),

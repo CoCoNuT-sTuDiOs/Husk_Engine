@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:husk_app/src/rust/api/simple.dart' show ObjectTransform;
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/widgets/collapsible_section.dart';
 import 'package:husk_app/ui/widgets/readout_row.dart';
+import 'package:husk_app/ui/widgets/number_field.dart';
 
 /// The Properties editor: collapsible sections for whatever is active,
 /// each with one clear job. More sections (and tabs, once there are several
@@ -20,7 +22,11 @@ class PropertiesPanel extends StatelessWidget {
       listenable: studio,
       builder: (context, _) {
         return ListView(
-          children: [
+                    children: [
+            CollapsibleSection(
+              title: 'Transform',
+              child: _TransformSection(studio: studio),
+            ),
             CollapsibleSection(
               title: 'Skeleton',
               child: _SkeletonSection(studio: studio),
@@ -42,6 +48,118 @@ class PropertiesPanel extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _TransformSection extends StatelessWidget {
+  const _TransformSection({required this.studio});
+
+  final StudioController studio;
+
+  @override
+  Widget build(BuildContext context) {
+ final t = studio.activeTransform;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _VectorRow(
+          label: 'Position',
+          value: t.position,
+          onChanged: (v) => studio.setActiveTransform(
+            ObjectTransform(
+              position: v,
+              rotationDegrees: t.rotationDegrees,
+              scale: t.scale,
+            ),
+          ),
+        ),
+        _VectorRow(
+          label: 'Rotation (degrees)',
+          value: t.rotationDegrees,
+          onChanged: (v) => studio.setActiveTransform(
+            ObjectTransform(
+              position: t.position,
+              rotationDegrees: v,
+              scale: t.scale,
+            ),
+          ),
+        ),
+        _VectorRow(
+          label: 'Scale',
+          value: t.scale,
+          onChanged: (v) => studio.setActiveTransform(
+            ObjectTransform(
+              position: t.position,
+              rotationDegrees: t.rotationDegrees,
+              scale: v,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A label with three number boxes under it, for X, Y and Z.
+class _VectorRow extends StatelessWidget {
+  const _VectorRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final String label;
+  final (double, double, double) value;
+  final bool enabled;
+  final ValueChanged<(double, double, double)> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final (x, y, z) = value;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: HuskText.readout),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: NumberField(
+                  label: 'X',
+                  labelColor: HuskColors.error,
+                  value: x,
+                  enabled: enabled,
+                  onChanged: (v) => onChanged((v, y, z)),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: NumberField(
+                  label: 'Y',
+                  labelColor: HuskColors.success,
+                  value: y,
+                  enabled: enabled,
+                  onChanged: (v) => onChanged((x, v, z)),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: NumberField(
+                  label: 'Z',
+                  labelColor: HuskColors.blue,
+                  value: z,
+                  enabled: enabled,
+                  onChanged: (v) => onChanged((x, y, v)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

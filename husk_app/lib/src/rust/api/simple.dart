@@ -188,11 +188,6 @@ bool setVertexWeight({
   boneIndex: boneIndex,
 );
 
-/// Adds a built-in shape ("cube", "plane", "capsule" or "torus") to the
-/// scene at screen pixel (x, y), for example where a tray item was
-/// dropped. Returns the new object's index, or None for an unknown
-/// shape name or when the pixel cannot be placed. The active object
-/// does not change.
 BigInt? addShape({
   required String name,
   required double x,
@@ -205,10 +200,6 @@ BigInt? addShape({
 BigInt? selectObjectAt({required double x, required double y}) =>
     RustLib.instance.api.crateApiSimpleSelectObjectAt(x: x, y: y);
 
-/// Deletes the active object from the scene. The loaded model itself
-/// (object 0) cannot be deleted. Returns the index that was deleted, or
-/// None if nothing was. Objects after it move down one place, and the
-/// loaded model becomes the active object.
 BigInt? removeActiveObject() =>
     RustLib.instance.api.crateApiSimpleRemoveActiveObject();
 
@@ -225,9 +216,74 @@ bool selectObject({required BigInt index}) =>
 /// The names of the built-in shapes, in the order the tray shows them.
 List<String> shapeNames() => RustLib.instance.api.crateApiSimpleShapeNames();
 
-/// A picture of one built-in shape for the tray: `size` x `size` RGBA
-/// pixels with a transparent background. It draws on its own throwaway
-/// renderer, so it is not marked sync: it runs off the UI thread and
-/// takes a moment. None for an unknown shape name.
 Future<Uint8List?> shapePreview({required String name, required int size}) =>
     RustLib.instance.api.crateApiSimpleShapePreview(name: name, size: size);
+
+/// The active object's transform.
+ObjectTransform activeObjectTransform() =>
+    RustLib.instance.api.crateApiSimpleActiveObjectTransform();
+
+/// Sets the active object's transform and redraws it there. Returns false,
+/// changing nothing, for any value that is not a finite number. A scale
+/// too close to zero is nudged away from it.
+bool setActiveObjectTransform({required ObjectTransform transform}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleSetActiveObjectTransform(transform: transform);
+
+/// Where the cursor at screen pixel (x, y) falls along the axis line that
+/// passes through `origin` in direction `axis` (both in the scene), as a
+/// distance t along the axis from `origin`. A gizmo drag moves an object by
+/// the difference between this value now and at the start of the drag.
+/// None when the cursor ray runs parallel to the axis.
+double? axisDragParam({
+  required (double, double, double) origin,
+  required (double, double, double) axis,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiSimpleAxisDragParam(
+  origin: origin,
+  axis: axis,
+  x: x,
+  y: y,
+);
+
+/// The screen pixels to draw one gizmo axis between: where `origin` is on
+/// screen, and the tip of an arrow `pixels` long pointing the way `axis`
+/// points on screen. None if the origin is behind the camera.
+((double, double), (double, double))? gizmoAxisEnds({
+  required (double, double, double) origin,
+  required (double, double, double) axis,
+  required double pixels,
+}) => RustLib.instance.api.crateApiSimpleGizmoAxisEnds(
+  origin: origin,
+  axis: axis,
+  pixels: pixels,
+);
+
+/// An object's placement as the Properties panel shows it: position,
+/// rotation in degrees about X, Y and Z (Blender's order) and scale.
+class ObjectTransform {
+  final (double, double, double) position;
+  final (double, double, double) rotationDegrees;
+  final (double, double, double) scale;
+
+  const ObjectTransform({
+    required this.position,
+    required this.rotationDegrees,
+    required this.scale,
+  });
+
+  @override
+  int get hashCode =>
+      position.hashCode ^ rotationDegrees.hashCode ^ scale.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ObjectTransform &&
+          runtimeType == other.runtimeType &&
+          position == other.position &&
+          rotationDegrees == other.rotationDegrees &&
+          scale == other.scale;
+}

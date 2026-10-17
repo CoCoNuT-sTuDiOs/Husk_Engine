@@ -57,6 +57,7 @@ const OBJECT_COLORS: [[f32; 4]; 4] = [
 struct SceneUniform {
     view_proj: [[f32; 4]; 4],
     model: [[f32; 4]; 4],
+    normal_matrix: [[f32; 4]; 4],
     light_dir: [f32; 4],
     light_color: [f32; 4],
     base_color: [f32; 4],
@@ -410,6 +411,17 @@ impl Renderer {
         const PREVIEW_COLOR: [f32; 4] = [0.70, 0.72, 0.76, 1.0];
         let mut renderer = Renderer::new(size, size, mesh);
         renderer.objects[0].base_color = PREVIEW_COLOR;
+        // Fit the whole shape (its bounding sphere) in the frame, so every
+        // preview fills about the same share of its tile.
+        let centre = renderer.orbit_target;
+        let radius = renderer.objects[0]
+            .mesh_data
+            .positions
+            .iter()
+            .map(|p| (glam::Vec3::from(*p) - centre).length())
+            .fold(0.0_f32, f32::max)
+            .max(0.01);
+        renderer.orbit_distance = radius / (std::f32::consts::FRAC_PI_4 * 0.5).sin() * 1.1;
         // A three-quarter view from slightly above.
         renderer.orbit(0.6, 0.15);
         renderer.render_frame();
@@ -595,7 +607,10 @@ impl Renderer {
         for object in &self.objects {
             let scene_uniform = SceneUniform {
                 view_proj: view_proj.to_cols_array_2d(),
-                model: object.model.to_cols_array_2d(),
+                 model: object.model.to_cols_array_2d(),
+                // The inverse transpose keeps normals correct under
+                // non-uniform scale.
+                normal_matrix: object.model.inverse().transpose().to_cols_array_2d(),
                 light_dir,
                 light_color: [1.0, 1.0, 1.0, 1.0],
                 base_color: object.base_color,
@@ -774,16 +789,13 @@ impl Renderer {
     }
 
     pub fn project_to_screen(&self, world_point: glam::Vec3) -> Option<(f32, f32)> {
-        let clip = self.last_view_proj * world_point.extend(1.0);
-        if clip.w <= 0.0 {
-            return None;
-        }
-        let ndc_x = clip.x / clip.w;
-        let ndc_y = clip.y / clip.w;
-        Some((
-            (ndc_x * 0.5 + 0.5) * self.width as f32,
-            (0.5 - ndc_y * 0.5) * self.height as f32,
-        ))
+        crate::render::picking::project_to_screen(
+            self.last_view_proj,
+            self.width as f32,
+            self.height as f32,
+            world_point,
+        )
+
     }
 
     /// The camera's right-hand direction on screen, as of the last rendered frame.
@@ -848,7 +860,47 @@ impl Renderer {
         Some(near + direction * t)
     }
 
+    /// Where the cursor at screen pixel (x, y) falls along an axis line
+    /// through `axis_origin` (see `picking::closest_param_on_axis`), using
+    /// the camera from the last rendered frame.
+    pub fn axis_drag_param(
+        &self,
+        screen_x: f32,
+        screen_y: f32,
+        axis_origin: glam::Vec3,
+        axis_dir: glam::Vec3,
+    ) -> Option<f32> {
+        let ray = crate::render::picking::Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            self.last_view_proj,
+        );
+        crate::render::picking::closest_param_on_axis(&ray, axis_origin, axis_dir)
+    }
+
+    /// The screen pixels to draw one gizmo axis between (see
+    /// `picking::axis_screen_ends`), using the camera from the last
+    /// rendered frame.
+    pub fn gizmo_axis_ends(
+        &self,
+        axis_origin: glam::Vec3,
+        axis_dir: glam::Vec3,
+        pixels: f32,
+    ) -> Option<((f32, f32), (f32, f32))> {
+        crate::render::picking::axis_screen_ends(
+            self.last_view_proj,
+            self.width as f32,
+            self.height as f32,
+            axis_origin,
+            axis_dir,
+            pixels,
+        )
+    }
+
     /// The index of the object under screen pixel (x, y), using the camera
+
     /// from the last rendered frame and each object's own placement. The
     /// nearest object along the ray wins; None if the pixel shows empty
     /// space. Tests the objects' rest shapes, not their posed ones.
@@ -895,7 +947,21 @@ impl Renderer {
         self.active_object = crate::scene::active_after_removal(self.active_object, index);
         true
     }
-    pub fn pick_inside(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
+
+    /// Sets where the object at `index` is drawn. The scene holds the
+    /// real transform; this is its GPU-side copy. False, changing
+    /// nothing, if there is no such object.
+    pub fn set_object_model(&mut self, index: usize, model: glam::Mat4) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) => {
+                object.model = model;
+                true
+            }
+            None => false,
+        }
+    }
+
+        pub fn pick_inside(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
         let ray = crate::render::picking::Ray::from_screen(
             screen_x,
             screen_y,
@@ -903,15 +969,17 @@ impl Renderer {
             self.height as f32,
             self.last_view_proj,
         );
-        let mesh = &self.objects[self.active_object].mesh_data;
-        crate::render::picking::ray_mesh_midpoint(&ray, &mesh.positions, &mesh.indices)
+        let object = &self.objects[self.active_object];
+        let mesh = &object.mesh_data;
+        let local = ray.to_local(object.model);
+        crate::render::picking::ray_mesh_midpoint(&local, &mesh.positions, &mesh.indices)
     }
 
     /// Casts a ray from a screen-space point (in pixels, matching this
     /// renderer's own width/height) using the camera matrix from the most
     /// recently rendered frame, and returns the world-space point where it
-    /// hits the active object's mesh, if any. Assumes the active object
-    /// sits at the origin (true until Section 5d adds object transforms).
+    /// hits the active object's mesh, if any, wherever that object is
+    /// placed.
     pub fn pick(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
         let ray = crate::render::picking::Ray::from_screen(
             screen_x,
@@ -920,8 +988,13 @@ impl Renderer {
             self.height as f32,
             self.last_view_proj,
         );
-        let mesh = &self.objects[self.active_object].mesh_data;
-        crate::render::picking::ray_mesh_intersection(&ray, &mesh.positions, &mesh.indices)
-            .map(|hit| hit.point)
+        let object = &self.objects[self.active_object];
+        let mesh = &object.mesh_data;
+        // Test in the object's own space. A distance t along the local ray
+        // is the same t along the world ray, so the scene point comes
+        // straight from the world ray.
+        let local = ray.to_local(object.model);
+        crate::render::picking::ray_mesh_intersection(&local, &mesh.positions, &mesh.indices)
+            .map(|hit| ray.origin + ray.direction * hit.distance)
     }
 }

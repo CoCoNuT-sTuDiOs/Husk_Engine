@@ -28,6 +28,19 @@ impl Ray {
             direction: (far_point - near_point).normalize(),
         }
     }
+
+    /// The same ray seen from inside a placed object: its origin and
+    /// direction moved into the object's own space by the inverse of
+    /// `model`. The direction is NOT re-normalized, so a distance t along
+    /// this ray is the same t along the original, and hits on different
+    /// objects stay comparable.
+    pub fn to_local(&self, model: glam::Mat4) -> Ray {
+        let inverse = model.inverse();
+        Ray {
+            origin: inverse.transform_point3(self.origin),
+            direction: inverse.transform_vector3(self.direction),
+        }
+    }
 }
 
 /// Result of a successful ray-mesh intersection.
@@ -102,14 +115,9 @@ pub fn pick_nearest(
 ) -> Option<usize> {
     let mut best: Option<(usize, f32)> = None;
     for (index, (model, positions, indices)) in placed.iter().enumerate() {
-        let inverse = model.inverse();
-        // Moving both the origin and the direction into the mesh's own
-        // space keeps t the same along the ray, so hits on different
-        // meshes can be compared directly.
-        let local = Ray {
-            origin: inverse.transform_point3(ray.origin),
-            direction: inverse.transform_vector3(ray.direction),
-        };
+        // Moving the ray into the mesh's own space keeps t the same along
+        // it, so hits on different meshes can be compared directly.
+        let local = ray.to_local(*model);
         if let Some(hit) = ray_mesh_intersection(&local, positions, indices) {
             if best.map_or(true, |(_, nearest)| hit.distance < nearest) {
                 best = Some((index, hit.distance));
@@ -118,6 +126,85 @@ pub fn pick_nearest(
     }
     best.map(|(index, _)| index)
 }
+
+
+/// Projects a scene point to screen pixels (origin at the top left) for a
+/// viewport of `width` x `height` pixels. None if the point is behind the
+/// camera.
+pub fn project_to_screen(
+    view_proj: glam::Mat4,
+    width: f32,
+    height: f32,
+    point: glam::Vec3,
+) -> Option<(f32, f32)> {
+    let clip = view_proj * point.extend(1.0);
+    if clip.w <= 0.0 {
+        return None;
+    }
+    let ndc_x = clip.x / clip.w;
+    let ndc_y = clip.y / clip.w;
+    Some((
+        (ndc_x * 0.5 + 0.5) * width,
+        (0.5 - ndc_y * 0.5) * height,
+    ))
+}
+
+/// Where along an axis line the ray passes closest to it: the t for which
+/// `axis_origin + axis_dir * t` (with `axis_dir` as a unit vector) is the
+/// point of the axis nearest the ray. Dragging a gizmo arrow uses the
+/// difference between two of these, so the object follows the cursor along
+/// the axis. None when the ray runs parallel to the axis (there is no
+/// single nearest point) or the axis has no direction.
+pub fn closest_param_on_axis(
+    ray: &Ray,
+    axis_origin: glam::Vec3,
+    axis_dir: glam::Vec3,
+) -> Option<f32> {
+    let axis = axis_dir.normalize_or_zero();
+    if axis == glam::Vec3::ZERO {
+        return None;
+    }
+    let to_axis = axis_origin - ray.origin;
+    let b = axis.dot(ray.direction);
+    let c = ray.direction.dot(ray.direction);
+    let d = axis.dot(to_axis);
+    let e = ray.direction.dot(to_axis);
+    // axis . axis is 1, so the usual denominator a*c - b*b is c - b*b.
+    let denominator = c - b * b;
+    if denominator <= 1e-6 * c {
+        return None;
+    }
+    Some((b * e - c * d) / denominator)
+}
+
+/// Where to draw one gizmo axis: the screen position of `origin`, and of an
+/// arrow tip exactly `pixels` away from it, in the direction the axis
+/// points on screen. None if the origin is behind the camera. An axis
+/// pointing straight at the camera has no direction on screen, so its tip
+/// lands on the origin.
+pub fn axis_screen_ends(
+    view_proj: glam::Mat4,
+    width: f32,
+    height: f32,
+    origin: glam::Vec3,
+    axis_dir: glam::Vec3,
+    pixels: f32,
+) -> Option<((f32, f32), (f32, f32))> {
+    let start = project_to_screen(view_proj, width, height, origin)?;
+    let step = origin + axis_dir.normalize_or_zero() * 0.01;
+    let toward = project_to_screen(view_proj, width, height, step).unwrap_or(start);
+    let (dx, dy) = (toward.0 - start.0, toward.1 - start.1);
+    let length = (dx * dx + dy * dy).sqrt();
+    if length < 1e-3 {
+        return Some((start, start));
+    }
+    Some((
+        start,
+        (start.0 + dx / length * pixels, start.1 + dy / length * pixels),
+    ))
+}
+
+
 
 fn ray_triangle_intersection(ray: &Ray, v0: glam::Vec3, v1: glam::Vec3, v2: glam::Vec3) -> Option<f32> {
 const EPSILON: f32 = 1e-6;
@@ -185,9 +272,116 @@ mod tests {
         (positions, indices[..6].to_vec())
     }
 
+
+    fn test_camera() -> glam::Mat4 {
+        let projection =
+            glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let view = glam::Mat4::look_at_rh(
+            glam::Vec3::new(0.0, 0.0, 5.0),
+            glam::Vec3::ZERO,
+            glam::Vec3::Y,
+        );
+        projection * view
+    }
+
+    #[test]
+    fn closest_param_on_axis_follows_the_cursor_along_the_axis() {
+        // A ray coming straight down from above x = 2.
+        let down = Ray {
+            origin: glam::Vec3::new(2.0, 5.0, 0.0),
+            direction: glam::Vec3::new(0.0, -1.0, 0.0),
+        };
+        let t = closest_param_on_axis(&down, glam::Vec3::ZERO, glam::Vec3::X).unwrap();
+        assert!((t - 2.0).abs() < 1e-5);
+
+        // Against an axis that starts at x = 1, the same ray is 1 along it.
+        let t = closest_param_on_axis(&down, glam::Vec3::new(1.0, 0.0, 0.0), glam::Vec3::X)
+            .unwrap();
+        assert!((t - 1.0).abs() < 1e-5);
+
+        // Height and depth off the axis do not matter, only where along it.
+        let deep = Ray {
+            origin: glam::Vec3::new(3.0, 1.0, 4.0),
+            direction: glam::Vec3::new(0.0, 0.0, -1.0),
+        };
+        let t = closest_param_on_axis(&deep, glam::Vec3::ZERO, glam::Vec3::X).unwrap();
+        assert!((t - 3.0).abs() < 1e-5);
+
+        // A slanted ray that crosses the axis at x = 5.
+        let slanted = Ray {
+            origin: glam::Vec3::new(0.0, 0.0, 5.0),
+            direction: glam::Vec3::new(1.0, 0.0, -1.0).normalize(),
+        };
+        let t = closest_param_on_axis(&slanted, glam::Vec3::ZERO, glam::Vec3::X).unwrap();
+        assert!((t - 5.0).abs() < 1e-4);
+
+        // The axis direction need not be a unit vector: t is still measured
+        // in units of the normalised direction.
+        let t = closest_param_on_axis(&down, glam::Vec3::ZERO, glam::Vec3::X * 4.0).unwrap();
+        assert!((t - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn closest_param_on_axis_has_no_answer_for_parallel_rays_or_a_zero_axis() {
+        let along_x = Ray {
+            origin: glam::Vec3::new(0.0, 1.0, 0.0),
+            direction: glam::Vec3::X,
+        };
+        assert!(closest_param_on_axis(&along_x, glam::Vec3::ZERO, glam::Vec3::X).is_none());
+        assert!(closest_param_on_axis(&ray_down_z(), glam::Vec3::ZERO, glam::Vec3::ZERO)
+            .is_none());
+    }
+
+    #[test]
+    fn project_to_screen_puts_the_centre_in_the_middle_and_hides_what_is_behind() {
+        let vp = test_camera();
+        let (x, y) = project_to_screen(vp, 800.0, 800.0, glam::Vec3::ZERO).unwrap();
+        assert!((x - 400.0).abs() < 1e-3 && (y - 400.0).abs() < 1e-3);
+        // Up in the scene is up on the screen, which is a smaller y.
+        let (_, above) = project_to_screen(vp, 800.0, 800.0, glam::Vec3::Y).unwrap();
+        assert!(above < 400.0);
+        let behind = glam::Vec3::new(0.0, 0.0, 10.0);
+        assert!(project_to_screen(vp, 800.0, 800.0, behind).is_none());
+    }
+
+    #[test]
+    fn axis_ends_are_drawn_the_asked_number_of_pixels_long() {
+        let vp = test_camera();
+        let origin = glam::Vec3::ZERO;
+
+        let (start, x_tip) =
+            axis_screen_ends(vp, 800.0, 800.0, origin, glam::Vec3::X, 100.0).unwrap();
+        assert!((start.0 - 400.0).abs() < 1e-3);
+        assert!((x_tip.0 - 500.0).abs() < 1e-2 && (x_tip.1 - 400.0).abs() < 1e-2);
+
+        let (_, y_tip) =
+            axis_screen_ends(vp, 800.0, 800.0, origin, glam::Vec3::Y, 100.0).unwrap();
+        assert!((y_tip.0 - 400.0).abs() < 1e-2 && (y_tip.1 - 300.0).abs() < 1e-2);
+
+        // An axis pointing straight at the camera has no direction on screen.
+        let (start, z_tip) =
+            axis_screen_ends(vp, 800.0, 800.0, origin, glam::Vec3::Z, 100.0).unwrap();
+        assert_eq!(start, z_tip);
+
+        let behind = glam::Vec3::new(0.0, 0.0, 10.0);
+        assert!(axis_screen_ends(vp, 800.0, 800.0, behind, glam::Vec3::X, 100.0).is_none());
+    }
+
+    #[test]
+    fn to_local_keeps_distances_along_the_ray() {
+    let model = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -3.0))
+            * glam::Mat4::from_scale(glam::Vec3::splat(2.0));
+        let ray = ray_down_z();
+        let local = ray.to_local(model);
+        let t = 2.5;
+        let world_point = ray.origin + ray.direction * t;
+        let back = model.transform_point3(local.origin + local.direction * t);
+        assert!((back - world_point).length() < 1e-4);
+    }
+
     #[test]
     fn pick_nearest_chooses_the_closer_placed_mesh() {
-        let (positions, indices) = one_quad();
+    let (positions, indices) = one_quad();
         // The quad sits at z = 1 as built; moved by -3 it sits at z = -2.
         let at_z1 = glam::Mat4::IDENTITY;
         let at_z_minus2 = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -3.0));

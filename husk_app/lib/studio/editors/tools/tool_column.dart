@@ -36,11 +36,18 @@ class ToolColumn extends StatelessWidget {
                 onTap: () => studio.setTool(StudioTool.placeBones),
               ),
               _ToolButton(
-                icon: PhosphorIcon(PhosphorIconsRegular.arrowsOutCardinal),
-                tooltip: 'Move character',
+                icon: PhosphorIcon(PhosphorIconsRegular.arrowsLeftRight),
+                tooltip: 'Move character (animation)',
                 selected: studio.tool == StudioTool.move,
                 onTap: () => studio.setTool(StudioTool.move),
               ),
+              _ToolButton(
+                icon: PhosphorIcon(PhosphorIconsRegular.arrowsOutCardinal),
+                tooltip: 'Move object',
+                selected: studio.tool == StudioTool.moveObject,
+                onTap: () => studio.setTool(StudioTool.moveObject),
+              ),
+
             ],
           );
         },

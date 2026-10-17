@@ -55,6 +55,42 @@ impl Transform {
             degrees.x.to_radians(),
         );
     }
+
+    /// A point given in the object's own space, as the scene sees it.
+    pub fn point_to_world(&self, point: Vec3) -> Vec3 {
+        self.to_matrix().transform_point3(point)
+    }
+
+    /// A scene point, expressed in the object's own space (where its
+    /// skeleton and mesh live).
+    pub fn point_to_local(&self, point: Vec3) -> Vec3 {
+        self.to_matrix().inverse().transform_point3(point)
+    }
+
+    /// A scene direction (such as "towards the viewer") expressed in the
+    /// object's own space, as a unit vector. A zero direction stays zero.
+    pub fn direction_to_local(&self, direction: Vec3) -> Vec3 {
+        self.to_matrix()
+            .inverse()
+            .transform_vector3(direction)
+            .normalize_or_zero()
+    }
+}
+
+/// Keeps each scale component away from zero (a flattened-to-nothing
+/// object cannot be lit or picked), keeping its sign.
+pub fn clamp_scale(scale: Vec3) -> Vec3 {
+    const MIN: f32 = 0.001;
+    let fix = |s: f32| {
+        if s.abs() >= MIN {
+            s
+        } else if s.is_sign_negative() {
+            -MIN
+        } else {
+            MIN
+        }
+    };
+    Vec3::new(fix(scale.x), fix(scale.y), fix(scale.z))
 }
 
 #[cfg(test)]
@@ -62,7 +98,7 @@ mod tests {
     use super::*;
 
     fn assert_close(a: Vec3, b: Vec3) {
-        assert!((a - b).length() < 1e-4, "{a:?} is not close to {b:?}");
+assert!((a - b).length() < 1e-4, "{a:?} is not close to {b:?}");
     }
 
     #[test]
@@ -113,6 +149,45 @@ mod tests {
 
         t.set_euler_degrees(Vec3::new(0.0, 90.0, 0.0));
         assert_close(t.rotation * Vec3::Z, Vec3::X);
+    }
+    fn awkward_transform() -> Transform {
+        let mut t = Transform::default();
+        t.translation = Vec3::new(3.0, -1.0, 2.0);
+        t.scale = Vec3::new(2.0, 0.5, 1.5);
+        t.set_euler_degrees(Vec3::new(30.0, 40.0, 50.0));
+        t
+    }
+
+    #[test]
+    fn points_convert_to_world_and_back() {
+        let t = awkward_transform();
+        let p = Vec3::new(0.7, -0.2, 1.1);
+        assert_close(t.point_to_world(p), t.to_matrix().transform_point3(p));
+        assert_close(t.point_to_local(t.point_to_world(p)), p);
+        assert_close(t.point_to_world(t.point_to_local(p)), p);
+    }
+
+    #[test]
+    fn directions_convert_into_object_space_as_unit_vectors() {
+        let mut t = Transform::default();
+        t.scale = Vec3::splat(3.0);
+        t.rotation = Quat::from_rotation_z(90f32.to_radians());
+        // Local X turns into world Y, so world Y is local X.
+        assert_close(t.direction_to_local(Vec3::Y), Vec3::X);
+        let d = awkward_transform().direction_to_local(Vec3::new(0.3, -0.8, 0.5));
+        assert!((d.length() - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn clamp_scale_keeps_sign_and_avoids_zero() {
+    assert_close(
+            clamp_scale(Vec3::new(0.0, -0.0001, 2.0)),
+            Vec3::new(0.001, -0.001, 2.0),
+        );
+        assert_close(
+            clamp_scale(Vec3::new(-3.0, 0.5, 0.001)),
+            Vec3::new(-3.0, 0.5, 0.001),
+        );
     }
 
     #[test]

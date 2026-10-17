@@ -1,6 +1,7 @@
 struct SceneUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
+    normal_matrix: mat4x4<f32>,
     light_dir: vec4<f32>,
     light_color: vec4<f32>,
     base_color: vec4<f32>,
@@ -39,7 +40,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     let skinned_normal = skin_matrix * vec4<f32>(in.normal, 0.0);
 
 out.clip_position = scene.view_proj * scene.model * skinned_position;
-    out.world_normal = (scene.model * skinned_normal).xyz;
+    out.world_normal = (scene.normal_matrix * skinned_normal).xyz;
     return out;
 }
 

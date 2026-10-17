@@ -20,7 +20,10 @@ class ViewportToolStrip extends StatelessWidget {
         return 'Place bones';
       case StudioTool.move:
         return 'Move character';
+      case StudioTool.moveObject:
+        return 'Move object';
     }
+
   }
 
   List<Widget> _options(BuildContext context, StudioController studio) {
@@ -52,7 +55,15 @@ class ViewportToolStrip extends StatelessWidget {
             style: HuskText.readout,
           ),
         ];
+      case StudioTool.moveObject:
+        return [
+          const Text(
+            'Drag an arrow to move the active object along that axis',
+            style: HuskText.readout,
+          ),
+        ];
     }
+
   }
 
   @override

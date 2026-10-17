@@ -27,9 +27,11 @@ pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, 
     })
     .flatten()?;
 
+    // The hit is in the object's own space, where its skeleton lives. The
+    // transform is taken before locking the scene for the bones.
+    let space = crate::scene::active_transform().1;
     let mut active = crate::scene::active_object();
     let skeleton = &mut active.skeleton;
-
     let local_position = match parent {
     Some(parent_index) => {
             let world_matrices = skeleton.world_bind_matrices();
@@ -42,7 +44,8 @@ pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, 
     let name = format!("bone_{}", skeleton.bones.len());
     let index = skeleton.add_bone(&name, parent, local_position);
 
-    Some((index, hit.x, hit.y, hit.z))
+    let world = space.point_to_world(hit);
+    Some((index, world.x, world.y, world.z))
 }
 
 /// Returns the number of bones placed so far in the current skeleton.
@@ -142,6 +145,9 @@ pub fn rotate_bone(bone_index: usize, angle_degrees: f32) -> bool {
 /// root joints, bad indices, or when there's no active renderer.
 #[flutter_rust_bridge::frb(sync)]
 pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
+    // Joints live in the object's own space; the cursor and the camera's
+    // drag plane are in the scene. Taken before any scene lock.
+    let space = crate::scene::active_transform().1;
     let joint_position = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;
@@ -153,7 +159,7 @@ pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
     };
 
     let Some(target) = crate::platform::ffi::with_active_renderer(|renderer| {
-        renderer.screen_to_view_plane(x as f32, y as f32, joint_position)
+renderer.screen_to_view_plane(x as f32, y as f32, space.point_to_world(joint_position))
     })
     .flatten() else {
         return false;
@@ -162,7 +168,7 @@ pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
     let skin_matrices = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;
-        if !pose.aim_joint_at(&skeleton, bone_index, target) {
+        if !pose.aim_joint_at(&skeleton, bone_index, space.point_to_local(target)) {
         return false;
         }
         pose.skinning_matrices(&skeleton)
@@ -180,7 +186,10 @@ pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
 /// grandparent, or there's no active renderer.
 #[flutter_rust_bridge::frb(sync)]
 pub fn drag_limb(bone_index: usize, x: f64, y: f64) -> bool {
-    let joint_position = {
+    // Joints live in the object's own space; the cursor and the camera's
+    // drag plane are in the scene. Taken before any scene lock.
+    let space = crate::scene::active_transform().1;
+let joint_position = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;
 pose.ensure_covers(&skeleton);
@@ -192,8 +201,8 @@ pose.ensure_covers(&skeleton);
 
     let Some((target, toward_viewer)) = crate::platform::ffi::with_active_renderer(|renderer| {
         renderer
-            .screen_to_view_plane(x as f32, y as f32, joint_position)
-            .map(|point| (point, -renderer.view_forward()))
+            .screen_to_view_plane(x as f32, y as f32, space.point_to_world(joint_position))
+        .map(|point| (point, -renderer.view_forward()))
     })
     .flatten() else {
         return false;
@@ -202,7 +211,12 @@ pose.ensure_covers(&skeleton);
     let skin_matrices = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;
-        if !pose.solve_two_bone_ik(&skeleton, bone_index, target, toward_viewer) {
+        if !pose.solve_two_bone_ik(
+            &skeleton,
+            bone_index,
+            space.point_to_local(target),
+            space.direction_to_local(toward_viewer),
+        ) {
         return false;
         }
         pose.skinning_matrices(&skeleton)
@@ -325,6 +339,9 @@ pub fn repeat_period() -> Option<f32> {
 /// Returns false if there is no skeleton or no active renderer.
 #[flutter_rust_bridge::frb(sync)]
 pub fn move_character(x: f64, y: f64) -> bool {
+    // The root offset lives in the object's own space; the cursor and the
+    // camera's drag plane are in the scene. Taken before any scene lock.
+    let space = crate::scene::active_transform().1;
     let (root_position, rest_position) = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;        
@@ -338,7 +355,7 @@ pub fn move_character(x: f64, y: f64) -> bool {
     };
 
     let Some(target) = crate::platform::ffi::with_active_renderer(|renderer| {
-        renderer.screen_to_view_plane(x as f32, y as f32, root_position)
+renderer.screen_to_view_plane(x as f32, y as f32, space.point_to_world(root_position))
     })
     .flatten() else {
         return false;
@@ -347,7 +364,7 @@ pub fn move_character(x: f64, y: f64) -> bool {
     let skin_matrices = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;
-        pose.root_offset = target - rest_position;
+        pose.root_offset = space.point_to_local(target) - rest_position;
         pose.skinning_matrices(&skeleton)
     };
     crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
@@ -369,9 +386,16 @@ pub fn set_travel_speed(speed: f32) -> bool {
     let Some(right) = crate::platform::ffi::with_active_renderer(|renderer| renderer.view_right()) else {
         return false;
     };
+    // Root motion is stored in the object's own space (as in Blender), so
+    // the scene-space velocity is carried into it, before the scene lock.
+    let velocity = crate::scene::active_transform()
+        .1
+        .to_matrix()
+        .inverse()
+        .transform_vector3(right * speed);
     let mut active = crate::scene::active_object();
     let timeline = &mut active.timeline;
-    timeline.travel_velocity = right * speed;  
+    timeline.travel_velocity = velocity;
     timeline.travel_speed = speed;
     true
 }
@@ -469,6 +493,8 @@ pub fn load_project(path: String) -> (bool, String) {
 /// that joint is behind the camera.
 #[flutter_rust_bridge::frb(sync)]
 pub fn joint_screen_positions() -> Vec<Option<(f32, f32)>> {
+    // Joints are in the object's own space; the screen needs scene space.
+    let model = crate::scene::active_transform().1.to_matrix();
     let positions = {
         let mut active = crate::scene::active_object();
         let crate::scene::Object { skeleton, pose, .. } = &mut *active;
@@ -479,7 +505,7 @@ pub fn joint_screen_positions() -> Vec<Option<(f32, f32)>> {
     crate::platform::ffi::with_active_renderer(|renderer| {
         positions
             .iter()
-            .map(|p| renderer.project_to_screen(*p))
+            .map(|p| renderer.project_to_screen(model.transform_point3(*p)))
             .collect()
     })
     .unwrap_or_default()
@@ -541,11 +567,6 @@ pub fn set_vertex_weight(vertex_index: usize, bone_index: usize) -> bool {
 
 
 
-/// Adds a built-in shape ("cube", "plane", "capsule" or "torus") to the
-/// scene at screen pixel (x, y), for example where a tray item was
-/// dropped. Returns the new object's index, or None for an unknown
-/// shape name or when the pixel cannot be placed. The active object
-/// does not change.
 #[flutter_rust_bridge::frb(sync)]
 pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
     let mesh = crate::geometry::shapes::by_name(&name)?;
@@ -588,10 +609,6 @@ pub fn select_object_at(x: f64, y: f64) -> Option<usize> {
     Some(index)
 }
 
-/// Deletes the active object from the scene. The loaded model itself
-/// (object 0) cannot be deleted. Returns the index that was deleted, or
-/// None if nothing was. Objects after it move down one place, and the
-/// loaded model becomes the active object.
 #[flutter_rust_bridge::frb(sync)]
 pub fn remove_active_object() -> Option<usize> {
     let index = crate::scene::remove_active_object()?;
@@ -633,16 +650,112 @@ pub fn shape_names() -> Vec<String> {
         .collect()
 }
 
-/// A picture of one built-in shape for the tray: `size` x `size` RGBA
-/// pixels with a transparent background. It draws on its own throwaway
-/// renderer, so it is not marked sync: it runs off the UI thread and
-/// takes a moment. None for an unknown shape name.
 pub fn shape_preview(name: String, size: u32) -> Option<Vec<u8>> {
     let mesh = crate::geometry::shapes::by_name(&name)?;
     Some(crate::render::renderer::Renderer::render_preview(
         mesh,
         size.clamp(16, 512),
     ))
+}
+
+/// An object's placement as the Properties panel shows it: position,
+/// rotation in degrees about X, Y and Z (Blender's order) and scale.
+pub struct ObjectTransform {
+    pub position: (f32, f32, f32),
+    pub rotation_degrees: (f32, f32, f32),
+    pub scale: (f32, f32, f32),
+}
+
+/// The active object's transform.
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_object_transform() -> ObjectTransform {
+    let transform = crate::scene::active_transform().1;
+    let euler = transform.euler_degrees();
+    ObjectTransform {
+        position: (
+            transform.translation.x,
+            transform.translation.y,
+            transform.translation.z,
+        ),
+        rotation_degrees: (euler.x, euler.y, euler.z),
+        scale: (transform.scale.x, transform.scale.y, transform.scale.z),
+    }
+}
+
+
+/// Sets the active object's transform and redraws it there. Returns false,
+/// changing nothing, for any value that is not a finite number. A scale
+/// too close to zero is nudged away from it.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_active_object_transform(transform: ObjectTransform) -> bool {
+    let position = glam::Vec3::new(transform.position.0, transform.position.1, transform.position.2);
+    let rotation = glam::Vec3::new(
+        transform.rotation_degrees.0,
+        transform.rotation_degrees.1,
+        transform.rotation_degrees.2,
+    );
+    let scale = glam::Vec3::new(transform.scale.0, transform.scale.1, transform.scale.2);
+    if !(position.is_finite() && rotation.is_finite() && scale.is_finite()) {
+        return false;
+    }
+
+    let mut placed = crate::scene::transform::Transform::default();
+    placed.translation = position;
+    placed.set_euler_degrees(rotation);
+    placed.scale = crate::scene::transform::clamp_scale(scale);
+
+    let Some(index) = crate::scene::set_active_transform(placed) else {
+        return false;
+    };
+    let applied = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.set_object_model(index, placed.to_matrix())
+    });
+    if applied != Some(true) {
+        eprintln!("Husk: the scene moved object {index} but the renderer did not; the two lists are out of step");
+    }
+    true
+}
+
+/// Where the cursor at screen pixel (x, y) falls along the axis line that
+/// passes through `origin` in direction `axis` (both in the scene), as a
+/// distance t along the axis from `origin`. A gizmo drag moves an object by
+/// the difference between this value now and at the start of the drag.
+/// None when the cursor ray runs parallel to the axis.
+#[flutter_rust_bridge::frb(sync)]
+pub fn axis_drag_param(
+    origin: (f32, f32, f32),
+    axis: (f32, f32, f32),
+    x: f64,
+    y: f64,
+) -> Option<f32> {
+    crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.axis_drag_param(
+            x as f32,
+            y as f32,
+            glam::Vec3::new(origin.0, origin.1, origin.2),
+            glam::Vec3::new(axis.0, axis.1, axis.2),
+        )
+    })
+    .flatten()
+}
+
+/// The screen pixels to draw one gizmo axis between: where `origin` is on
+/// screen, and the tip of an arrow `pixels` long pointing the way `axis`
+/// points on screen. None if the origin is behind the camera.
+#[flutter_rust_bridge::frb(sync)]
+pub fn gizmo_axis_ends(
+    origin: (f32, f32, f32),
+    axis: (f32, f32, f32),
+    pixels: f32,
+) -> Option<((f32, f32), (f32, f32))> {
+    crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.gizmo_axis_ends(
+            glam::Vec3::new(origin.0, origin.1, origin.2),
+            glam::Vec3::new(axis.0, axis.1, axis.2),
+            pixels,
+        )
+    })
+    .flatten()
 }
 
 #[flutter_rust_bridge::frb(init)]

@@ -28,12 +28,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_box_autoadd_f_32(dynamic raw);
 
   @protected
+  ObjectTransform dco_decode_box_autoadd_object_transform(dynamic raw);
+
+  @protected
   (double, double) dco_decode_box_autoadd_record_f_32_f_32(dynamic raw);
 
   @protected
   (double, double, double) dco_decode_box_autoadd_record_f_32_f_32_f_32(
     dynamic raw,
   );
+
+  @protected
+  ((double, double), (double, double))
+  dco_decode_box_autoadd_record_record_f_32_f_32_record_f_32_f_32(dynamic raw);
 
   @protected
   (BigInt, double) dco_decode_box_autoadd_record_usize_f_32(dynamic raw);
@@ -69,6 +76,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  ObjectTransform dco_decode_object_transform(dynamic raw);
+
+  @protected
   double? dco_decode_opt_box_autoadd_f_32(dynamic raw);
 
   @protected
@@ -76,6 +86,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (double, double, double)? dco_decode_opt_box_autoadd_record_f_32_f_32_f_32(
+    dynamic raw,
+  );
+
+  @protected
+  ((double, double), (double, double))?
+  dco_decode_opt_box_autoadd_record_record_f_32_f_32_record_f_32_f_32(
     dynamic raw,
   );
 
@@ -108,6 +124,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   (List<String>, BigInt) dco_decode_record_list_string_usize(dynamic raw);
 
   @protected
+  ((double, double), (double, double))
+  dco_decode_record_record_f_32_f_32_record_f_32_f_32(dynamic raw);
+
+  @protected
   (BigInt, double) dco_decode_record_usize_f_32(dynamic raw);
 
   @protected
@@ -137,12 +157,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_box_autoadd_f_32(SseDeserializer deserializer);
 
   @protected
+  ObjectTransform sse_decode_box_autoadd_object_transform(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   (double, double) sse_decode_box_autoadd_record_f_32_f_32(
     SseDeserializer deserializer,
   );
 
   @protected
   (double, double, double) sse_decode_box_autoadd_record_f_32_f_32_f_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ((double, double), (double, double))
+  sse_decode_box_autoadd_record_record_f_32_f_32_record_f_32_f_32(
     SseDeserializer deserializer,
   );
 
@@ -186,6 +217,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  ObjectTransform sse_decode_object_transform(SseDeserializer deserializer);
+
+  @protected
   double? sse_decode_opt_box_autoadd_f_32(SseDeserializer deserializer);
 
   @protected
@@ -195,6 +229,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (double, double, double)? sse_decode_opt_box_autoadd_record_f_32_f_32_f_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ((double, double), (double, double))?
+  sse_decode_opt_box_autoadd_record_record_f_32_f_32_record_f_32_f_32(
     SseDeserializer deserializer,
   );
 
@@ -237,6 +277,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ((double, double), (double, double))
+  sse_decode_record_record_f_32_f_32_record_f_32_f_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   (BigInt, double) sse_decode_record_usize_f_32(SseDeserializer deserializer);
 
   @protected
@@ -269,6 +315,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_f_32(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_object_transform(
+    ObjectTransform self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_record_f_32_f_32(
     (double, double) self,
     SseSerializer serializer,
@@ -277,6 +329,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_record_f_32_f_32_f_32(
     (double, double, double) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_record_record_f_32_f_32_record_f_32_f_32(
+    ((double, double), (double, double)) self,
     SseSerializer serializer,
   );
 
@@ -329,6 +387,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_object_transform(
+    ObjectTransform self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_f_32(double? self, SseSerializer serializer);
 
   @protected
@@ -340,6 +404,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_record_f_32_f_32_f_32(
     (double, double, double)? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_record_record_f_32_f_32_record_f_32_f_32(
+    ((double, double), (double, double))? self,
     SseSerializer serializer,
   );
 
@@ -391,6 +461,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_record_list_string_usize(
     (List<String>, BigInt) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_record_record_f_32_f_32_record_f_32_f_32(
+    ((double, double), (double, double)) self,
     SseSerializer serializer,
   );
 

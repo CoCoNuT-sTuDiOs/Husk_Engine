@@ -10,6 +10,7 @@ import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/studio/state/timeline_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
+import 'package:husk_app/ui/typing.dart';
 
 /// The Husk Studio window layout (Blender-style): top bar with menus, tool
 /// column on the left, viewport in the middle with the timeline under it,
@@ -54,8 +55,9 @@ class _StudioShellState extends State<StudioShell> {
   bool _handleKey(KeyEvent event) {
     if (!HardwareKeyboard.instance.isControlPressed) return false;
     final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.keyZ &&
-        (event is KeyDownEvent || event is KeyRepeatEvent)) {
+        if (key == LogicalKeyboardKey.keyZ &&
+        (event is KeyDownEvent || event is KeyRepeatEvent) &&
+        !isTyping()) {
       _actions.undoBone(context);
       return true;
     }

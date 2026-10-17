@@ -13,6 +13,9 @@ enum StudioTool {
 
   /// Drag anywhere to move the whole character.
   move,
+
+  /// Drag an arrow on the active object to move it along that axis.
+  moveObject,
 }
 
 /// Studio's interface state: what is selected, which tool is active, and so
@@ -117,6 +120,26 @@ BigInt? get selectedBone => _selectedBone;
     return index;
   }
 
+  /// The active object's transform. The Rust core owns it; this only
+  /// reads it.
+  rust.ObjectTransform get activeTransform => rust.activeObjectTransform();
+  bool setActiveTransform(rust.ObjectTransform transform) {
+    final applied = rust.setActiveObjectTransform(transform: transform);
+    if (applied) notifyListeners();
+    return applied;
+  }
+
+  /// Moves the active object to [position], keeping its rotation and scale.
+  bool setActivePosition((double, double, double) position) {
+    final current = rust.activeObjectTransform();
+    return setActiveTransform(
+      rust.ObjectTransform(
+        position: position,
+        rotationDegrees: current.rotationDegrees,
+        scale: current.scale,
+      ),
+    );
+  }
   /// The scene's object names, in order, and the index of the active one.
   /// The Rust core owns the list; this only reads it.
   (List<String>, int) get objectList {
