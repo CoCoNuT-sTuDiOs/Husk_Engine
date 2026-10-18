@@ -261,6 +261,59 @@ double? axisDragParam({
   pixels: pixels,
 );
 
+/// The screen points of a gizmo ring: a circle about `pixels` in radius
+/// around `origin`, in the plane perpendicular to `axis`, as `segments` + 1
+/// points that close the loop. None if the origin is behind the camera.
+List<(double, double)>? gizmoRing({
+  required (double, double, double) origin,
+  required (double, double, double) axis,
+  required double pixels,
+  required int segments,
+}) => RustLib.instance.api.crateApiSimpleGizmoRing(
+  origin: origin,
+  axis: axis,
+  pixels: pixels,
+  segments: segments,
+);
+
+/// The angle (radians) of the cursor at screen pixel (x, y) around the
+/// axis through `origin`, measured on the plane perpendicular to it. A
+/// rotate drag turns the object by the change in this angle. None when
+/// that plane is seen almost edge-on.
+double? ringDragAngle({
+  required (double, double, double) origin,
+  required (double, double, double) axis,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiSimpleRingDragAngle(
+  origin: origin,
+  axis: axis,
+  x: x,
+  y: y,
+);
+
+/// The smallest signed turn (radians, -pi to pi) that takes angle `from`
+/// to angle `to`.
+double angleDifference({required double from, required double to}) =>
+    RustLib.instance.api.crateApiSimpleAngleDifference(from: from, to: to);
+
+/// The Euler angles (degrees, Blender's XYZ order) of an object that has
+/// rotation `start_degrees`, after turning it by `angle` radians about the
+/// fixed scene axis `axis`.
+(double, double, double) rotatedEulerDegrees({
+  required (double, double, double) startDegrees,
+  required (double, double, double) axis,
+  required double angle,
+}) => RustLib.instance.api.crateApiSimpleRotatedEulerDegrees(
+  startDegrees: startDegrees,
+  axis: axis,
+  angle: angle,
+);
+
+/// The active object's own X, Y and Z axes as directions in the scene.
+((double, double, double), (double, double, double), (double, double, double))
+activeObjectAxes() => RustLib.instance.api.crateApiSimpleActiveObjectAxes();
+
 /// An object's placement as the Properties panel shows it: position,
 /// rotation in degrees about X, Y and Z (Blender's order) and scale.
 class ObjectTransform {

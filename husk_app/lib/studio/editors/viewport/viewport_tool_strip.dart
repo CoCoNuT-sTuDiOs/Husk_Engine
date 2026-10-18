@@ -22,8 +22,11 @@ class ViewportToolStrip extends StatelessWidget {
         return 'Move character';
       case StudioTool.moveObject:
         return 'Move object';
+      case StudioTool.rotateObject:
+        return 'Rotate object';
+      case StudioTool.scaleObject:
+        return 'Scale object';
     }
-
   }
 
   List<Widget> _options(BuildContext context, StudioController studio) {
@@ -59,6 +62,20 @@ class ViewportToolStrip extends StatelessWidget {
         return [
           const Text(
             'Drag an arrow to move the active object along that axis',
+            style: HuskText.readout,
+          ),
+        ];
+      case StudioTool.rotateObject:
+        return [
+          const Text(
+            'Drag a ring to turn the active object (orbit if a ring is edge-on)',
+            style: HuskText.readout,
+          ),
+        ];
+      case StudioTool.scaleObject:
+        return [
+          const Text(
+            'Drag a handle to scale along that axis, or the centre box to scale all three',
             style: HuskText.readout,
           ),
         ];

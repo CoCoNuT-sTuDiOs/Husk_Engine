@@ -13,9 +13,15 @@ class GizmoAxis {
   final Offset tip;
 }
 
-/// Everything the viewport asks of the engine: the render texture and its
-/// size, the camera, joint hit-testing and joint drags. The viewport widget
-/// calls these and never talks to Rust itself.
+/// One rotation ring as drawn on screen: which axis it turns about (0 = X,
+/// 1 = Y, 2 = Z) and its points, in render pixels, closing the loop.
+class GizmoRing {
+  const GizmoRing(this.index, this.points);
+
+  final int index;
+  final List<Offset> points;
+}
+
 class ViewportController {
   static const MethodChannel _channel = MethodChannel('husk/texture');
 
@@ -95,14 +101,19 @@ class ViewportController {
   /// The gizmo arrows for an object at [position], each [pixels] long on
   /// screen, in render pixels. An arrow is left out when the object is
   /// behind the camera.
-  List<GizmoAxis> gizmoAxes((double, double, double) position, double pixels) {
+  List<GizmoAxis> gizmoAxes(
+    (double, double, double) position,
+    double pixels, {
+    List<(double, double, double)> directions = gizmoAxisDirections,
+  }) {
     final axes = <GizmoAxis>[];
-    for (var i = 0; i < gizmoAxisDirections.length; i++) {
+    for (var i = 0; i < directions.length; i++) {
       final ends = rust.gizmoAxisEnds(
         origin: position,
-        axis: gizmoAxisDirections[i],
+        axis: directions[i],
         pixels: pixels,
       );
+
       if (ends == null) continue;
       final (start, tip) = ends;
       axes.add(GizmoAxis(i, Offset(start.$1, start.$2), Offset(tip.$1, tip.$2)));
@@ -118,12 +129,15 @@ class ViewportController {
     Offset pointer,
     (double, double, double) position,
     double scale,
-    double length,
-  ) {
+    double length, {
+    List<(double, double, double)> directions = gizmoAxisDirections,
+  }) {
     const hitRadius = 12.0;
     int? best;
     var bestDistance = hitRadius;
-    for (final axis in gizmoAxes(position, length / scale)) {
+    for (final axis
+        in gizmoAxes(position, length / scale, directions: directions)) {
+
       final start = axis.start * scale;
       final tip = axis.tip * scale;
       if ((tip - start).distance < 4) continue;
@@ -143,13 +157,130 @@ class ViewportController {
     (double, double, double) position,
     int axis,
     double x,
+    double y, {
+    List<(double, double, double)> directions = gizmoAxisDirections,
+  }) =>
+      rust.axisDragParam(
+        origin: position,
+        axis: directions[axis],
+        x: x,
+        y: y,
+      );
+
+  /// The centre handle of the scale gizmo, after the three axis handles.
+  static const int uniformScaleHandle = 3;
+
+  /// Where [position] is on screen, in render pixels; null when it is
+  /// behind the camera.
+  Offset? screenPoint((double, double, double) position) {
+    final axes = gizmoAxes(position, 10);
+    return axes.isEmpty ? null : axes.first.start;
+  }
+
+  /// The scale handle under [pointer] (panel pixels), if any: 0 = X, 1 = Y,
+  /// 2 = Z along the object's own axes [directions], or
+  /// [uniformScaleHandle] for the centre box, which wins where it overlaps
+  /// an arrow. [scale] converts render pixels to panel pixels, and [length]
+  /// is how long the arrows are drawn, in panel pixels.
+  int? scaleHandleAt(
+    Offset pointer,
+    (double, double, double) position,
+    double scale,
+    double length,
+    List<(double, double, double)> directions,
+  ) {
+    final origin = screenPoint(position);
+    if (origin == null) return null;
+    if ((pointer - origin * scale).distance <= 12) return uniformScaleHandle;
+    return gizmoAxisAt(
+      pointer,
+      position,
+      scale,
+      length,
+      directions: directions,
+    );
+  }
+
+  /// How many segments a rotation ring is drawn with.
+  static const int _ringSegments = 64;
+
+  /// The three rotation rings for an object at [position], each [radius]
+  /// pixels in radius on screen, in render pixels. A ring is left out when
+  /// the object is behind the camera.
+  List<GizmoRing> gizmoRings((double, double, double) position, double radius) {
+    final rings = <GizmoRing>[];
+    for (var i = 0; i < gizmoAxisDirections.length; i++) {
+      final points = rust.gizmoRing(
+        origin: position,
+        axis: gizmoAxisDirections[i],
+        pixels: radius,
+        segments: _ringSegments,
+      );
+      if (points == null) continue;
+      rings.add(GizmoRing(i, [for (final p in points) Offset(p.$1, p.$2)]));
+    }
+    return rings;
+  }
+
+  /// The rotation ring under [pointer] (panel pixels), if any: 0 = X,
+  /// 1 = Y, 2 = Z. [scale] converts render pixels to panel pixels, and
+  /// [radius] is how big the rings are drawn, in panel pixels.
+  int? gizmoRingAt(
+    Offset pointer,
+    (double, double, double) position,
+    double scale,
+    double radius,
+  ) {
+    const hitRadius = 10.0;
+    int? best;
+    var bestDistance = hitRadius;
+    for (final ring in gizmoRings(position, radius / scale)) {
+      for (var i = 0; i + 1 < ring.points.length; i++) {
+        final distance = _distanceToSegment(
+          pointer,
+          ring.points[i] * scale,
+          ring.points[i + 1] * scale,
+        );
+        if (distance <= bestDistance) {
+          best = ring.index;
+          bestDistance = distance;
+        }
+      }
+    }
+    return best;
+  }
+
+  /// The angle (radians) of the cursor at render pixel (x, y) around ring
+  /// axis [axis] (0 = X, 1 = Y, 2 = Z) through [position]. Null when that
+  /// ring is seen almost edge-on.
+  double? ringAngle(
+    (double, double, double) position,
+    int axis,
+    double x,
     double y,
   ) =>
-      rust.axisDragParam(
+      rust.ringDragAngle(
         origin: position,
         axis: gizmoAxisDirections[axis],
         x: x,
         y: y,
+      );
+
+  /// The smallest signed turn (radians) that takes angle [from] to [to].
+  double angleDifference(double from, double to) =>
+      rust.angleDifference(from: from, to: to);
+
+  /// The rotation (Euler degrees) of an object that had rotation [start]
+  /// and has since been turned by [angle] radians about scene axis [axis].
+  (double, double, double) rotatedEuler(
+    (double, double, double) start,
+    int axis,
+    double angle,
+  ) =>
+      rust.rotatedEulerDegrees(
+        startDegrees: start,
+        axis: gizmoAxisDirections[axis],
+        angle: angle,
       );
 
   static double _distanceToSegment(Offset point, Offset a, Offset b) {

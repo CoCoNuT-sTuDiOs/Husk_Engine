@@ -758,6 +758,88 @@ pub fn gizmo_axis_ends(
     .flatten()
 }
 
+
+/// The screen points of a gizmo ring: a circle about `pixels` in radius
+/// around `origin`, in the plane perpendicular to `axis`, as `segments` + 1
+/// points that close the loop. None if the origin is behind the camera.
+#[flutter_rust_bridge::frb(sync)]
+pub fn gizmo_ring(
+    origin: (f32, f32, f32),
+    axis: (f32, f32, f32),
+    pixels: f32,
+    segments: u32,
+) -> Option<Vec<(f32, f32)>> {
+    crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.gizmo_ring(
+            glam::Vec3::new(origin.0, origin.1, origin.2),
+            glam::Vec3::new(axis.0, axis.1, axis.2),
+            pixels,
+            segments as usize,
+        )
+    })
+    .flatten()
+}
+
+/// The angle (radians) of the cursor at screen pixel (x, y) around the
+/// axis through `origin`, measured on the plane perpendicular to it. A
+/// rotate drag turns the object by the change in this angle. None when
+/// that plane is seen almost edge-on.
+#[flutter_rust_bridge::frb(sync)]
+pub fn ring_drag_angle(
+    origin: (f32, f32, f32),
+    axis: (f32, f32, f32),
+    x: f64,
+    y: f64,
+) -> Option<f32> {
+    crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.ring_drag_angle(
+            x as f32,
+            y as f32,
+            glam::Vec3::new(origin.0, origin.1, origin.2),
+            glam::Vec3::new(axis.0, axis.1, axis.2),
+        )
+    })
+    .flatten()
+}
+
+/// The smallest signed turn (radians, -pi to pi) that takes angle `from`
+/// to angle `to`.
+#[flutter_rust_bridge::frb(sync)]
+pub fn angle_difference(from: f32, to: f32) -> f32 {
+    crate::render::picking::angle_difference(from, to)
+}
+
+/// The Euler angles (degrees, Blender's XYZ order) of an object that has
+/// rotation `start_degrees`, after turning it by `angle` radians about the
+/// fixed scene axis `axis`.
+#[flutter_rust_bridge::frb(sync)]
+pub fn rotated_euler_degrees(
+    start_degrees: (f32, f32, f32),
+    axis: (f32, f32, f32),
+    angle: f32,
+) -> (f32, f32, f32) {
+    let mut turned = crate::scene::transform::Transform::default();
+    turned.set_euler_degrees(glam::Vec3::new(
+        start_degrees.0,
+        start_degrees.1,
+        start_degrees.2,
+    ));
+    turned.rotate_about_world_axis(glam::Vec3::new(axis.0, axis.1, axis.2), angle);
+    let euler = turned.euler_degrees();
+    (euler.x, euler.y, euler.z)
+}
+
+/// The active object's own X, Y and Z axes as directions in the scene.
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_object_axes() -> ((f32, f32, f32), (f32, f32, f32), (f32, f32, f32)) {
+    let axes = crate::scene::active_transform().1.local_axes();
+    (
+        (axes[0].x, axes[0].y, axes[0].z),
+        (axes[1].x, axes[1].y, axes[1].z),
+        (axes[2].x, axes[2].y, axes[2].z),
+    )
+}
+
 #[flutter_rust_bridge::frb(init)]
 pub fn init_app() {
 flutter_rust_bridge::setup_default_user_utils();

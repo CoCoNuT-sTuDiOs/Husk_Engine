@@ -75,9 +75,30 @@ impl Transform {
             .transform_vector3(direction)
             .normalize_or_zero()
     }
+
+    /// Turns the object by `angle` radians about a fixed axis of the scene
+    /// (not the object's own, already rotated axis), on top of its current
+    /// rotation. An axis with no direction changes nothing.
+    pub fn rotate_about_world_axis(&mut self, axis: Vec3, angle: f32) {
+        let axis = axis.normalize_or_zero();
+        if axis == Vec3::ZERO {
+            return;
+        }
+        self.rotation = (Quat::from_axis_angle(axis, angle) * self.rotation).normalize();
+    }
+
+    /// The object's own X, Y and Z axes as directions in the scene: the
+    /// rotation applied to the unit axes. Scale is not included.
+    pub fn local_axes(&self) -> [Vec3; 3] {
+        [
+            self.rotation * Vec3::X,
+            self.rotation * Vec3::Y,
+            self.rotation * Vec3::Z,
+        ]
+    }
 }
 
-/// Keeps each scale component away from zero (a flattened-to-nothing
+        /// Keeps each scale component away from zero (a flattened-to-nothing
 /// object cannot be lit or picked), keeping its sign.
 pub fn clamp_scale(scale: Vec3) -> Vec3 {
     const MIN: f32 = 0.001;
@@ -158,9 +179,42 @@ assert!((a - b).length() < 1e-4, "{a:?} is not close to {b:?}");
         t
     }
 
+
+    #[test]
+    fn local_axes_follow_the_rotation_and_ignore_the_scale() {
+        let plain = Transform::default().local_axes();
+        assert_close(plain[0], Vec3::X);
+        assert_close(plain[1], Vec3::Y);
+        assert_close(plain[2], Vec3::Z);
+
+        let mut t = Transform::default();
+        t.rotation = Quat::from_rotation_z(90f32.to_radians());
+        t.scale = Vec3::splat(5.0);
+        let axes = t.local_axes();
+        assert_close(axes[0], Vec3::Y);
+        assert_close(axes[1], -Vec3::X);
+        assert_close(axes[2], Vec3::Z);
+    }
+
+    #[test]
+    fn rotating_about_a_world_axis_is_applied_after_the_current_rotation() {
+    let mut t = Transform::default();
+        t.rotate_about_world_axis(Vec3::Z, 90f32.to_radians());
+        t.rotate_about_world_axis(Vec3::X, 90f32.to_radians());
+        // X turns to Y about the scene's Z axis, then Y to Z about the
+        // scene's X axis. Turning about the object's own, already rotated
+        // X axis would have ended at Y instead.
+        assert_close(t.rotation * Vec3::X, Vec3::Z);
+
+        // An axis with no direction changes nothing.
+        let before = t.rotation;
+        t.rotate_about_world_axis(Vec3::ZERO, 1.0);
+        assert_eq!(t.rotation, before);
+    }
+
     #[test]
     fn points_convert_to_world_and_back() {
-        let t = awkward_transform();
+    let t = awkward_transform();
         let p = Vec3::new(0.7, -0.2, 1.1);
         assert_close(t.point_to_world(p), t.to_matrix().transform_point3(p));
         assert_close(t.point_to_local(t.point_to_world(p)), p);

@@ -16,11 +16,15 @@ enum StudioTool {
 
   /// Drag an arrow on the active object to move it along that axis.
   moveObject,
+
+  /// Drag a ring around the active object to turn it about that axis.
+  rotateObject,
+
+  /// Drag a handle on the active object to scale it along that axis, or
+  /// the centre box to scale all three axes together.
+  scaleObject,
 }
 
-/// Studio's interface state: what is selected, which tool is active, and so
-/// on, plus the skeleton actions the panels trigger. The Rust core stays the
-/// source of truth for the scene itself. Fields are added slice by slice.
 class StudioController extends ChangeNotifier {
   StudioController() {
     // A model that already has a rig is for posing; a bare one is for
@@ -120,6 +124,12 @@ BigInt? get selectedBone => _selectedBone;
     return index;
   }
 
+  /// The active object's own X, Y and Z axes as directions in the scene.
+  List<(double, double, double)> get activeLocalAxes {
+    final (x, y, z) = rust.activeObjectAxes();
+    return [x, y, z];
+  }
+
   /// The active object's transform. The Rust core owns it; this only
   /// reads it.
   rust.ObjectTransform get activeTransform => rust.activeObjectTransform();
@@ -127,6 +137,33 @@ BigInt? get selectedBone => _selectedBone;
     final applied = rust.setActiveObjectTransform(transform: transform);
     if (applied) notifyListeners();
     return applied;
+  }
+
+  /// Turns the active object to [degrees] (X, Y, Z), keeping its position
+  /// and scale.
+  bool setActiveRotation((double, double, double) degrees) {
+    final current = rust.activeObjectTransform();
+    return setActiveTransform(
+      rust.ObjectTransform(
+        position: current.position,
+        rotationDegrees: degrees,
+        scale: current.scale,
+      ),
+    );
+  }
+
+
+  /// Sets the active object's scale to [scale] (X, Y, Z), keeping its
+  /// position and rotation.
+  bool setActiveScale((double, double, double) scale) {
+    final current = rust.activeObjectTransform();
+    return setActiveTransform(
+      rust.ObjectTransform(
+        position: current.position,
+        rotationDegrees: current.rotationDegrees,
+        scale: scale,
+      ),
+    );
   }
 
   /// Moves the active object to [position], keeping its rotation and scale.

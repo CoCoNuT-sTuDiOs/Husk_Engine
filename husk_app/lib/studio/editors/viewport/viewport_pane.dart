@@ -49,12 +49,19 @@ class _ViewportPaneState extends State<ViewportPane> {
   BigInt? _draggedJoint;
   bool _dragMovesCharacter = false;
 
-  // The gizmo arrow being dragged with the Move object tool (0 = X, 1 = Y,
-  // 2 = Z; null when the drag does something else), where the object was
-  // when the drag began, and how far along the arrow the cursor was then.
   int? _gizmoAxis;
   (double, double, double) _gizmoStart = (0, 0, 0);
   double _gizmoStartParam = 0;
+
+  (double, double, double) _ringStartRotation = (0, 0, 0);
+  double _ringPreviousAngle = 0;
+  double _ringTotal = 0;
+
+  (double, double, double) _scaleStart = (1, 1, 1);
+  List<(double, double, double)> _scaleAxes = const [];
+  Offset _scaleOrigin = Offset.zero;
+  double _scaleStartDistance = 0;
+  double _scaleRatio = 1;
 
   // The arrow to light up: the one under the cursor, or the one dragged.
   final ValueNotifier<int?> _gizmoHighlight = ValueNotifier<int?>(null);
@@ -181,7 +188,9 @@ class _ViewportPaneState extends State<ViewportPane> {
     } else {
       _studio.selectBone(null);
       if (_studio.tool == StudioTool.select ||
-          _studio.tool == StudioTool.moveObject) {
+          _studio.tool == StudioTool.moveObject ||
+          _studio.tool == StudioTool.rotateObject ||
+          _studio.tool == StudioTool.scaleObject) {
         final picked = _studio.selectObjectAt(
           details.localPosition.dx / scale,
           details.localPosition.dy / scale,
@@ -211,7 +220,14 @@ class _ViewportPaneState extends State<ViewportPane> {
         // A drag that starts on an arrow moves the object; anywhere else
         // it orbits the camera.
         _beginGizmoDrag(details.localPosition, scale);
+      case StudioTool.rotateObject:
+        // Likewise for a ring: on it, the object turns; elsewhere, orbit.
+        _beginRingDrag(details.localPosition, scale);
+      case StudioTool.scaleObject:
+        // And for a scale handle.
+        _beginScaleDrag(details.localPosition, scale);
     }
+
 
   }
 
@@ -258,11 +274,136 @@ class _ViewportPaneState extends State<ViewportPane> {
     _gizmoHighlight.value = axis;
   }
 
+  /// Starts a drag on a rotation ring if the pointer is on one and the ring
+  /// can be read (a ring seen exactly edge-on cannot); otherwise the drag
+  /// orbits the camera as usual.
+  void _beginRingDrag(Offset pointer, double scale) {
+    final position = _studio.activeTransform.position;
+    final axis = _viewport.gizmoRingAt(
+      pointer,
+      position,
+      scale,
+      kGizmoRingRadius,
+    );
+    if (axis == null) return;
+    final angle = _viewport.ringAngle(
+      position,
+      axis,
+      pointer.dx / scale,
+      pointer.dy / scale,
+    );
+    if (angle == null) return;
+    _gizmoAxis = axis;
+    _gizmoStart = position;
+    _ringStartRotation = _studio.activeTransform.rotationDegrees;
+    _ringPreviousAngle = angle;
+    _ringTotal = 0;
+    _gizmoHighlight.value = axis;
+  }
+
+  /// Turns the active object about the dragged ring's scene axis by how far
+  /// the cursor has gone around it since the drag began.
+  void _updateRingDrag(int axis, double x, double y) {
+    final angle = _viewport.ringAngle(_gizmoStart, axis, x, y);
+    // A ring seen edge-on has no angle: hold the rotation until it can be
+    // read again.
+    if (angle == null) return;
+    // Adding up the small steps lets the turn go past half a circle.
+    _ringTotal += _viewport.angleDifference(_ringPreviousAngle, angle);
+    _ringPreviousAngle = angle;
+    _studio.setActiveRotation(
+      _viewport.rotatedEuler(_ringStartRotation, axis, _ringTotal),
+    );
+  }
+
+  /// Starts a drag on a scale handle if the pointer is on one; otherwise
+  /// the drag orbits the camera as usual. The arrows run along the object's
+  /// own axes: scaling along a scene axis would shear a rotated object,
+  /// which an object transform cannot hold.
+  void _beginScaleDrag(Offset pointer, double scale) {
+    final position = _studio.activeTransform.position;
+    final axes = _studio.activeLocalAxes;
+    final handle = _viewport.scaleHandleAt(
+      pointer,
+      position,
+      scale,
+      kGizmoLength,
+      axes,
+    );
+    if (handle == null) return;
+    final x = pointer.dx / scale;
+    final y = pointer.dy / scale;
+    if (handle == ViewportController.uniformScaleHandle) {
+      final origin = _viewport.screenPoint(position);
+      if (origin == null) return;
+      _scaleOrigin = origin;
+      _scaleStartDistance = (Offset(x, y) - origin).distance;
+    } else {
+      final param = _viewport.axisParam(
+        position,
+        handle,
+        x,
+        y,
+        directions: axes,
+      );
+      // Grabbed too close to the object's origin to tell how far it was.
+      if (param == null || param.abs() < 1e-3) return;
+      _gizmoStartParam = param;
+    }
+    _gizmoAxis = handle;
+    _gizmoStart = position;
+    _scaleStart = _studio.activeTransform.scale;
+    _scaleAxes = axes;
+    _scaleRatio = scale;
+    _gizmoHighlight.value = handle;
+  }
+
+  /// Scales the active object by how far the cursor has moved. On an arrow
+  /// the scale on that axis grows and shrinks in proportion to the
+  /// cursor's distance along it from the object's origin. On the centre
+  /// box all three axes scale together.
+  void _updateScaleDrag(int handle, double x, double y) {
+    final (sx, sy, sz) = _scaleStart;
+    if (handle == ViewportController.uniformScaleHandle) {
+      final distance = (Offset(x, y) - _scaleOrigin).distance;
+      // Every 100 panel pixels outward doubles the size, moving back in
+      // shrinks it, and it never goes below 1 percent of where it began.
+      final factor = math.max(
+        0.01,
+        1 + (distance - _scaleStartDistance) * _scaleRatio / 100,
+      );
+      _studio.setActiveScale((sx * factor, sy * factor, sz * factor));
+      return;
+    }
+    final param = _viewport.axisParam(
+      _gizmoStart,
+      handle,
+      x,
+      y,
+      directions: _scaleAxes,
+    );
+    if (param == null) return;
+    final factor = param / _gizmoStartParam;
+    _studio.setActiveScale((
+      handle == 0 ? sx * factor : sx,
+      handle == 1 ? sy * factor : sy,
+      handle == 2 ? sz * factor : sz,
+    ));
+  }
+
   /// Moves the active object along the dragged arrow so the point that was
   /// grabbed stays under the cursor.
   void _updateGizmoDrag(double x, double y) {
     final axis = _gizmoAxis;
     if (axis == null) return;
+    if (_studio.tool == StudioTool.rotateObject) {
+      _updateRingDrag(axis, x, y);
+      return;
+    }
+    if (_studio.tool == StudioTool.scaleObject) {
+      _updateScaleDrag(axis, x, y);
+      return;
+    }
     final param = _viewport.axisParam(_gizmoStart, axis, x, y);
     if (param == null) return;
     final (dx, dy, dz) = ViewportController.gizmoAxisDirections[axis];
@@ -282,16 +423,31 @@ class _ViewportPaneState extends State<ViewportPane> {
   /// Lights up the gizmo arrow under the cursor while nothing is dragged.
   void _updateHover(Offset pointer, double scale) {
     if (_gizmoAxis != null) return;
-    if (_studio.tool != StudioTool.moveObject) {
-      _gizmoHighlight.value = null;
-      return;
+    final position = _studio.activeTransform.position;
+    switch (_studio.tool) {
+      case StudioTool.moveObject:
+        _gizmoHighlight.value =
+            _viewport.gizmoAxisAt(pointer, position, scale, kGizmoLength);
+      case StudioTool.rotateObject:
+        _gizmoHighlight.value = _viewport.gizmoRingAt(
+          pointer,
+          position,
+          scale,
+          kGizmoRingRadius,
+        );
+      case StudioTool.scaleObject:
+        _gizmoHighlight.value = _viewport.scaleHandleAt(
+          pointer,
+          position,
+          scale,
+          kGizmoLength,
+          _studio.activeLocalAxes,
+        );
+      case StudioTool.select:
+      case StudioTool.placeBones:
+      case StudioTool.move:
+        _gizmoHighlight.value = null;
     }
-    _gizmoHighlight.value = _viewport.gizmoAxisAt(
-      pointer,
-      _studio.activeTransform.position,
-      scale,
-      kGizmoLength,
-    );
   }
 
   Widget _buildRender(BuildContext context, int textureId) {

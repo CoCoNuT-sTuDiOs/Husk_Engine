@@ -177,6 +177,107 @@ pub fn closest_param_on_axis(
     Some((b * e - c * d) / denominator)
 }
 
+/// Two unit vectors that span the plane perpendicular to `axis` (a unit
+/// vector) and, with `axis`, form a right-handed set: turning from the
+/// first toward the second is a positive turn about `axis`. They depend
+/// only on `axis`, so an angle measured against them means the same thing
+/// from one frame to the next.
+fn basis_in_plane(axis: glam::Vec3) -> (glam::Vec3, glam::Vec3) {
+    // Start from whichever scene axis is least aligned with `axis`, so the
+    // cross product is well conditioned.
+    let helper = if axis.x.abs() < 0.9 {
+        glam::Vec3::X
+    } else {
+        glam::Vec3::Y
+    };
+    let first = axis.cross(helper).normalize();
+    let second = axis.cross(first);
+    (first, second)
+}
+
+/// How many screen pixels one scene unit spans at `point`, measured across
+/// the screen. None if the point is behind the camera.
+pub fn pixels_per_unit(
+    view_proj: glam::Mat4,
+    width: f32,
+    height: f32,
+    point: glam::Vec3,
+) -> Option<f32> {
+    let inverse = view_proj.inverse();
+    let middle = inverse.project_point3(glam::Vec3::new(0.0, 0.0, 0.5));
+    let right = inverse.project_point3(glam::Vec3::new(1.0, 0.0, 0.5));
+    let camera_right = (right - middle).normalize_or_zero();
+    let a = project_to_screen(view_proj, width, height, point)?;
+    let b = project_to_screen(view_proj, width, height, point + camera_right)?;
+    let pixels = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+    if pixels < 1e-6 {
+        None
+    } else {
+        Some(pixels)
+    }
+}
+
+/// The screen points of a gizmo ring: a circle about `pixels` in radius
+/// around `origin`, in the plane perpendicular to `axis`, as `segments` + 1
+/// points (the last equals the first, closing the loop). None if any point
+/// is behind the camera, the axis has no direction or there are fewer than
+/// three segments.
+pub fn ring_screen_points(
+    view_proj: glam::Mat4,
+    width: f32,
+    height: f32,
+    origin: glam::Vec3,
+    axis: glam::Vec3,
+    pixels: f32,
+    segments: usize,
+) -> Option<Vec<(f32, f32)>> {
+    let axis = axis.normalize_or_zero();
+    if axis == glam::Vec3::ZERO || segments < 3 {
+        return None;
+    }
+    let radius = pixels / pixels_per_unit(view_proj, width, height, origin)?;
+    let (first, second) = basis_in_plane(axis);
+    let mut points = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let angle = i as f32 / segments as f32 * std::f32::consts::TAU;
+        let point = origin + (first * angle.cos() + second * angle.sin()) * radius;
+        points.push(project_to_screen(view_proj, width, height, point)?);
+    }
+    Some(points)
+}
+
+/// The angle (radians, in -pi to pi) of the point where `ray` meets the
+/// plane through `origin` perpendicular to `axis`, measured around `axis`
+/// from a fixed reference direction in that plane. Turning an object about
+/// `axis` by the change in this angle keeps the grabbed point under the
+/// cursor. None when the plane is seen almost edge-on (the ray lies within
+/// about 6 degrees of it) or the axis has no direction.
+pub fn angle_around_axis(
+    ray: &Ray,
+    origin: glam::Vec3,
+    axis: glam::Vec3,
+) -> Option<f32> {
+    let axis = axis.normalize_or_zero();
+    if axis == glam::Vec3::ZERO {
+        return None;
+    }
+    let facing = axis.dot(ray.direction);
+    if facing.abs() < 0.1 * ray.direction.length() {
+        return None;
+    }
+    let t = axis.dot(origin - ray.origin) / facing;
+    let point = ray.origin + ray.direction * t;
+    let (first, second) = basis_in_plane(axis);
+    let offset = point - origin;
+    Some(offset.dot(second).atan2(offset.dot(first)))
+}
+
+/// The smallest signed turn (radians, in -pi to pi) that takes angle
+/// `from` to angle `to`.
+pub fn angle_difference(from: f32, to: f32) -> f32 {
+    (to - from + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+
 /// Where to draw one gizmo axis: the screen position of `origin`, and of an
 /// arrow tip exactly `pixels` away from it, in the direction the axis
 /// points on screen. None if the origin is behind the camera. An axis
@@ -284,9 +385,132 @@ mod tests {
         projection * view
     }
 
+    fn ray_through(from: glam::Vec3, to: glam::Vec3) -> Ray {
+        Ray {
+            origin: from,
+            direction: (to - from).normalize(),
+        }
+    }
+
+    #[test]
+    fn angle_around_axis_changes_by_exactly_the_turn_applied() {
+        let cases = [
+            (glam::Vec3::Z, glam::Vec3::new(0.0, 0.0, 6.0)),
+            (glam::Vec3::Y, glam::Vec3::new(0.0, 5.0, 5.0)),
+            (glam::Vec3::X, glam::Vec3::new(5.0, 2.0, 3.0)),
+            (
+                glam::Vec3::new(1.0, 1.0, 0.0).normalize(),
+                glam::Vec3::new(4.0, 4.0, 5.0),
+            ),
+        ];
+        for (axis, camera) in cases {
+            // Some point in the plane perpendicular to the axis, and the
+            // same point after turning it 0.7 radians about the axis.
+            let in_plane = axis
+                .cross(glam::Vec3::new(0.3, 0.9, 0.2))
+                .normalize()
+                * 1.5;
+            let turn = 0.7;
+            let turned = glam::Quat::from_axis_angle(axis, turn) * in_plane;
+
+            let before = angle_around_axis(&ray_through(camera, in_plane), glam::Vec3::ZERO, axis)
+                .unwrap();
+            let after = angle_around_axis(&ray_through(camera, turned), glam::Vec3::ZERO, axis)
+                .unwrap();
+            let change = angle_difference(before, after);
+            assert!(
+                (change - turn).abs() < 1e-4,
+                "axis {axis:?}: expected {turn}, got {change}"
+            );
+        }
+    }
+
+    #[test]
+    fn angle_around_axis_has_no_answer_when_the_plane_is_seen_edge_on() {
+        // A ray lying in the plane z = 0 meets it nowhere in particular.
+        let edge_on = Ray {
+            origin: glam::Vec3::new(0.0, 0.0, 0.0),
+            direction: glam::Vec3::Y,
+        };
+        assert!(angle_around_axis(&edge_on, glam::Vec3::ZERO, glam::Vec3::Z).is_none());
+        assert!(angle_around_axis(&ray_down_z(), glam::Vec3::ZERO, glam::Vec3::ZERO).is_none());
+    }
+
+    #[test]
+    fn angle_difference_takes_the_short_way_round() {
+        assert!(angle_difference(1.0, 1.0).abs() < 1e-6);
+        assert!((angle_difference(0.0, 0.5) - 0.5).abs() < 1e-6);
+        // From 3.0 to -3.0 the short way is a small turn forward, across pi.
+        let across = std::f32::consts::TAU - 6.0;
+        assert!((angle_difference(3.0, -3.0) - across).abs() < 1e-5);
+        assert!((angle_difference(-3.0, 3.0) + across).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pixels_per_unit_matches_the_camera() {
+        let ppu = pixels_per_unit(test_camera(), 800.0, 800.0, glam::Vec3::ZERO).unwrap();
+        // At distance 5 with a 45 degree view: 400 / (5 * tan(22.5 degrees)).
+        assert!((ppu - 193.137).abs() < 0.1, "got {ppu}");
+    }
+
+    #[test]
+    fn a_ring_facing_the_camera_is_a_circle_of_the_asked_radius() {
+        let points = ring_screen_points(
+            test_camera(),
+            800.0,
+            800.0,
+            glam::Vec3::ZERO,
+            glam::Vec3::Z,
+            100.0,
+            48,
+        )
+        .unwrap();
+        assert_eq!(points.len(), 49);
+        for (x, y) in &points {
+            let radius = ((x - 400.0).powi(2) + (y - 400.0).powi(2)).sqrt();
+            assert!((radius - 100.0).abs() < 0.05, "radius {radius}");
+        }
+        let (first, last) = (points[0], points[48]);
+        assert!((first.0 - last.0).abs() < 1e-2 && (first.1 - last.1).abs() < 1e-2);
+    }
+
+    #[test]
+    fn a_ring_seen_edge_on_flattens_to_a_line_and_bad_input_is_refused() {
+        // The camera sits in this ring's own plane (y = 0), so every point
+        // of it lands on the horizontal line through the screen centre.
+        let points = ring_screen_points(
+            test_camera(),
+            800.0,
+            800.0,
+            glam::Vec3::ZERO,
+            glam::Vec3::Y,
+            100.0,
+            48,
+        )
+        .unwrap();
+        for (_, y) in &points {
+            assert!((y - 400.0).abs() < 1e-2);
+        }
+        let behind = glam::Vec3::new(0.0, 0.0, 10.0);
+        assert!(
+            ring_screen_points(test_camera(), 800.0, 800.0, behind, glam::Vec3::Z, 100.0, 48)
+                .is_none()
+        );
+        assert!(ring_screen_points(
+            test_camera(),
+            800.0,
+            800.0,
+            glam::Vec3::ZERO,
+            glam::Vec3::Z,
+            100.0,
+            2
+        )
+        .is_none());
+    }
+
     #[test]
     fn closest_param_on_axis_follows_the_cursor_along_the_axis() {
-        // A ray coming straight down from above x = 2.
+    // A ray coming straight down from above x = 2.
         let down = Ray {
             origin: glam::Vec3::new(2.0, 5.0, 0.0),
             direction: glam::Vec3::new(0.0, -1.0, 0.0),

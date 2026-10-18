@@ -880,6 +880,46 @@ impl Renderer {
         crate::render::picking::closest_param_on_axis(&ray, axis_origin, axis_dir)
     }
 
+    /// The screen points of a gizmo ring (see `picking::ring_screen_points`),
+    /// using the camera from the last rendered frame.
+    pub fn gizmo_ring(
+        &self,
+        ring_origin: glam::Vec3,
+        ring_axis: glam::Vec3,
+        pixels: f32,
+        segments: usize,
+    ) -> Option<Vec<(f32, f32)>> {
+        crate::render::picking::ring_screen_points(
+            self.last_view_proj,
+            self.width as f32,
+            self.height as f32,
+            ring_origin,
+            ring_axis,
+            pixels,
+            segments,
+        )
+    }
+
+    /// The angle of the cursor at screen pixel (x, y) around the axis
+    /// through `ring_origin` (see `picking::angle_around_axis`), using the
+    /// camera from the last rendered frame.
+    pub fn ring_drag_angle(
+        &self,
+        screen_x: f32,
+        screen_y: f32,
+        ring_origin: glam::Vec3,
+        ring_axis: glam::Vec3,
+    ) -> Option<f32> {
+        let ray = crate::render::picking::Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            self.last_view_proj,
+        );
+        crate::render::picking::angle_around_axis(&ray, ring_origin, ring_axis)
+    }
+
     /// The screen pixels to draw one gizmo axis between (see
     /// `picking::axis_screen_ends`), using the camera from the last
     /// rendered frame.

@@ -47,7 +47,18 @@ class ToolColumn extends StatelessWidget {
                 selected: studio.tool == StudioTool.moveObject,
                 onTap: () => studio.setTool(StudioTool.moveObject),
               ),
-
+              _ToolButton(
+                icon: PhosphorIcon(PhosphorIconsRegular.arrowsClockwise),
+                tooltip: 'Rotate object',
+                selected: studio.tool == StudioTool.rotateObject,
+                onTap: () => studio.setTool(StudioTool.rotateObject),
+              ),
+              _ToolButton(
+                icon: PhosphorIcon(PhosphorIconsRegular.boundingBox),
+                tooltip: 'Scale object',
+                selected: studio.tool == StudioTool.scaleObject,
+                onTap: () => studio.setTool(StudioTool.scaleObject),
+              ),
             ],
           );
         },
