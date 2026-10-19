@@ -530,9 +530,11 @@ pub fn reset_skeleton() {
         let mut active = crate::scene::active_object();
         let name = std::mem::take(&mut active.name);
         let transform = active.transform;
+        let material = active.material;
         *active = crate::scene::Object {
             name,
             transform,
+            material,
             ..crate::scene::Object::default()
         };
 
@@ -570,7 +572,7 @@ pub fn set_vertex_weight(vertex_index: usize, bone_index: usize) -> bool {
 #[flutter_rust_bridge::frb(sync)]
 pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
     let mesh = crate::geometry::shapes::by_name(&name)?;
-    let (render_index, model) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+    let (render_index, model, colour) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
     renderer.add_shape_at_screen(mesh, x as f32, y as f32)
     })
     .flatten()?;
@@ -582,8 +584,13 @@ pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
     let scene_index = crate::scene::add_object(
         &label,
         crate::scene::transform::Transform::from_matrix(model),
+        crate::scene::material::Material {
+            base_color: [colour[0], colour[1], colour[2]],
+            ..crate::scene::material::Material::default()
+        },
+        crate::scene::ObjectKind::Mesh,
     );
-    if scene_index != render_index {
+            if scene_index != render_index {
         eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
@@ -837,6 +844,111 @@ pub fn active_object_axes() -> ((f32, f32, f32), (f32, f32, f32), (f32, f32, f32
         (axes[0].x, axes[0].y, axes[0].z),
         (axes[1].x, axes[1].y, axes[1].z),
         (axes[2].x, axes[2].y, axes[2].z),
+    )
+}
+
+/// How an object's surface looks, as the Properties panel shows it:
+/// colour (red, green, blue, each 0 to 1), roughness and metalness.
+pub struct ObjectMaterial {
+    pub base_color: (f32, f32, f32),
+    pub roughness: f32,
+    pub metalness: f32,
+}
+
+/// The active object's material.
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_object_material() -> ObjectMaterial {
+    let material = crate::scene::active_material().1;
+    ObjectMaterial {
+        base_color: (
+            material.base_color[0],
+            material.base_color[1],
+            material.base_color[2],
+        ),
+        roughness: material.roughness,
+        metalness: material.metalness,
+    }
+}
+
+/// Sets the active object's material and redraws it. Values outside 0 to 1
+/// are held inside it. Returns false, changing nothing, for any value that
+/// is not a finite number.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_active_object_material(material: ObjectMaterial) -> bool {
+    let values = [
+        material.base_color.0,
+        material.base_color.1,
+        material.base_color.2,
+        material.roughness,
+        material.metalness,
+    ];
+    if !values.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    let placed = crate::scene::material::Material {
+        base_color: [material.base_color.0, material.base_color.1, material.base_color.2],
+        roughness: material.roughness,
+        metalness: material.metalness,
+    }
+    .clamped();
+
+    let Some(index) = crate::scene::set_active_material(placed) else {
+        return false;
+    };
+    let applied = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.set_object_material(index, &placed)
+    });
+    if applied != Some(true) {
+        eprintln!("Husk: the scene restyled object {index} but the renderer did not; the two lists are out of step");
+    }
+    true
+}
+
+/// Adds a scene camera where the viewport is looking from, pointing the
+/// way the viewport looks. Returns its index. The active object does not
+/// change.
+#[flutter_rust_bridge::frb(sync)]
+pub fn add_camera() -> Option<usize> {
+    let (render_index, model, colour) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.add_camera_at_view(crate::geometry::shapes::camera_proxy())
+    })?;
+    let scene_index = crate::scene::add_object(
+        "Camera",
+        crate::scene::transform::Transform::from_matrix(model),
+        crate::scene::material::Material {
+            base_color: [colour[0], colour[1], colour[2]],
+            ..crate::scene::material::Material::default()
+        },
+        crate::scene::ObjectKind::Camera(crate::scene::camera::Camera::default()),
+    );
+    if scene_index != render_index {
+        eprintln!(
+            "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
+        );
+    }
+    Some(render_index)
+}
+
+/// The active object's vertical field of view in degrees, if it is a
+/// camera; None for anything else.
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_camera_fov() -> Option<f32> {
+    crate::scene::active_camera().map(|lens| lens.fov_degrees)
+}
+
+/// Sets the active camera's vertical field of view (held between 10 and
+/// 120 degrees). False, changing nothing, if the active object is not a
+/// camera or the value is not a finite number.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_active_camera_fov(degrees: f32) -> bool {
+    if !degrees.is_finite() {
+        return false;
+    }
+    crate::scene::set_active_camera(
+        crate::scene::camera::Camera {
+            fov_degrees: degrees,
+        }
+        .clamped(),
     )
 }
 

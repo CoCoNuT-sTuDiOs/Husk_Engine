@@ -30,6 +30,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_box_autoadd_f_32(dynamic raw);
 
   @protected
+  ObjectMaterial dco_decode_box_autoadd_object_material(dynamic raw);
+
+  @protected
   ObjectTransform dco_decode_box_autoadd_object_transform(dynamic raw);
 
   @protected
@@ -79,6 +82,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<(double, double)> dco_decode_list_record_f_32_f_32(dynamic raw);
+
+  @protected
+  ObjectMaterial dco_decode_object_material(dynamic raw);
 
   @protected
   ObjectTransform dco_decode_object_transform(dynamic raw);
@@ -171,6 +177,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_box_autoadd_f_32(SseDeserializer deserializer);
 
   @protected
+  ObjectMaterial sse_decode_box_autoadd_object_material(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ObjectTransform sse_decode_box_autoadd_object_transform(
     SseDeserializer deserializer,
   );
@@ -234,6 +245,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<(double, double)> sse_decode_list_record_f_32_f_32(
     SseDeserializer deserializer,
   );
+
+  @protected
+  ObjectMaterial sse_decode_object_material(SseDeserializer deserializer);
 
   @protected
   ObjectTransform sse_decode_object_transform(SseDeserializer deserializer);
@@ -345,6 +359,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_f_32(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_object_material(
+    ObjectMaterial self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_object_transform(
     ObjectTransform self,
     SseSerializer serializer,
@@ -419,6 +439,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_record_f_32_f_32(
     List<(double, double)> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_object_material(
+    ObjectMaterial self,
     SseSerializer serializer,
   );
 

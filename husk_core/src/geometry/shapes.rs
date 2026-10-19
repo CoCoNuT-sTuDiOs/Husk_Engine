@@ -137,6 +137,96 @@ pub fn sphere(radius: f32, segments: u32, rings: u32) -> MeshData {
     mesh
 }
 
+/// Adds one flat-shaded triangle whose front faces away from `inside` (a
+/// point inside the solid it belongs to), turning it round if needed.
+fn push_flat_triangle(
+    mesh: &mut MeshData,
+    a: glam::Vec3,
+    b: glam::Vec3,
+    c: glam::Vec3,
+    inside: glam::Vec3,
+) {
+    let mut normal = (b - a).cross(c - a).normalize_or_zero();
+    let (b, c) = if normal.dot(a - inside) < 0.0 {
+        normal = -normal;
+        (c, b)
+    } else {
+        (b, c)
+    };
+    let base = mesh.positions.len() as u32;
+    for point in [a, b, c] {
+        mesh.positions.push(point.to_array());
+        mesh.normals.push(normal.to_array());
+    }
+    mesh.indices.extend_from_slice(&[base, base + 1, base + 2]);
+}
+
+/// Two flat-shaded triangles for the quad a, b, c, d (in order around it).
+fn push_flat_quad(
+    mesh: &mut MeshData,
+    a: glam::Vec3,
+    b: glam::Vec3,
+    c: glam::Vec3,
+    d: glam::Vec3,
+    inside: glam::Vec3,
+) {
+    push_flat_triangle(mesh, a, b, c, inside);
+    push_flat_triangle(mesh, a, c, d, inside);
+}
+
+/// What a scene camera looks like in the viewport: a boxy body behind and
+/// a pyramid in front, opening away from it. The camera looks along its
+/// own negative Z axis (the pyramid's open end is at z = -0.7) with +Y up,
+/// as Blender's cameras do. About one unit across.
+pub fn camera_proxy() -> MeshData {
+    use glam::Vec3;
+    let mut mesh = MeshData::default();
+
+    // The body: a box from z = 0 to z = 0.5.
+    let (half_x, half_y) = (0.35, 0.25);
+    let (back, front) = (0.5, 0.0);
+    let body_centre = Vec3::new(0.0, 0.0, (back + front) * 0.5);
+    let corner = |x: f32, y: f32, z: f32| Vec3::new(x * half_x, y * half_y, z);
+    let (a, b, c, d) = (
+        corner(-1.0, -1.0, front),
+        corner(1.0, -1.0, front),
+        corner(1.0, 1.0, front),
+        corner(-1.0, 1.0, front),
+    );
+    let (e, f, g, h) = (
+        corner(-1.0, -1.0, back),
+        corner(1.0, -1.0, back),
+        corner(1.0, 1.0, back),
+        corner(-1.0, 1.0, back),
+    );
+    for quad in [
+        [a, b, c, d],
+        [e, f, g, h],
+        [a, b, f, e],
+        [d, c, g, h],
+        [a, d, h, e],
+        [b, c, g, f],
+    ] {
+        push_flat_quad(&mut mesh, quad[0], quad[1], quad[2], quad[3], body_centre);
+    }
+
+    // The lens: a pyramid with its tip at the body's front, opening forwards.
+    let tip = Vec3::ZERO;
+    let (open_x, open_y, open_z) = (0.5, 0.28, -0.7);
+    let open = [
+        Vec3::new(-open_x, -open_y, open_z),
+        Vec3::new(open_x, -open_y, open_z),
+        Vec3::new(open_x, open_y, open_z),
+        Vec3::new(-open_x, open_y, open_z),
+    ];
+    let lens_centre = Vec3::new(0.0, 0.0, open_z * 0.5);
+    for i in 0..4 {
+        push_flat_triangle(&mut mesh, tip, open[i], open[(i + 1) % 4], lens_centre);
+    }
+    push_flat_quad(&mut mesh, open[0], open[1], open[2], open[3], lens_centre);
+    mesh
+}
+
 /// The built-in shapes, in the order the tray shows them. `by_name`
 /// understands exactly these (any letter case). The tray asks the engine
 /// for this list, so a new shape only has to be added here and in
@@ -210,8 +300,31 @@ mod tests {
         assert!(by_name("").is_none());
     }
     #[test]
+    fn camera_proxy_is_well_formed_and_opens_towards_negative_z() {
+        let mesh = camera_proxy();
+        assert_well_formed(&mesh);
+        assert_outward_winding(&mesh);
+        // 6 box faces and the lens base are two triangles each; 4 lens sides.
+        assert_eq!(mesh.triangle_count(), 6 * 2 + 4 + 2);
+
+        let min_z = mesh.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+        let max_z = mesh.positions.iter().map(|p| p[2]).fold(f32::MIN, f32::max);
+        assert!((min_z + 0.7).abs() < 1e-5, "open end at {min_z}");
+        assert!((max_z - 0.5).abs() < 1e-5, "back at {max_z}");
+
+        // The open end is wider than the body.
+        let widest_open_end = mesh
+            .positions
+            .iter()
+            .filter(|p| (p[2] + 0.7).abs() < 1e-5)
+            .map(|p| p[0].abs())
+            .fold(0.0_f32, f32::max);
+        assert!((widest_open_end - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
     fn sphere_has_the_right_size_and_counts() {
-        let (radius, segments, rings) = (0.5, 24u32, 12u32);
+    let (radius, segments, rings) = (0.5, 24u32, 12u32);
         let mesh = sphere(radius, segments, rings);
         assert_well_formed(&mesh);
         assert_outward_winding(&mesh);

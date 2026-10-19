@@ -45,7 +45,7 @@ const MAX_BONES: usize = 128;
 
 /// Base colours for the first few objects so they can be told apart:
 /// Husk orange, tool blue, green and red from the palette.
-const OBJECT_COLORS: [[f32; 4]; 4] = [
+pub(crate) const OBJECT_COLORS: [[f32; 4]; 4] = [
     [0.976, 0.451, 0.086, 1.0],
     [0.231, 0.510, 0.965, 1.0],
     [0.133, 0.773, 0.369, 1.0],
@@ -62,6 +62,7 @@ struct SceneUniform {
     light_color: [f32; 4],
     base_color: [f32; 4],
     material: [f32; 4],
+    camera_pos: [f32; 4],
 }
 
 /// One drawable thing in the scene: its own geometry, its own bone
@@ -77,8 +78,9 @@ struct RenderObject {
     mesh_data: crate::geometry::mesh::MeshData,
     model: glam::Mat4,
     base_color: [f32; 4],
+    // Roughness, metalness and two unused values, as the shader reads them.
+    material: [f32; 4],
 }
-
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -398,8 +400,9 @@ impl Renderer {
             mesh_data: mesh,
             model,
             base_color,
+            material: [0.4, 0.2, 0.0, 0.0],
         }
-    }
+        }
 
     /// Draws one mesh on its own, fitted to the frame, at `size` x `size`
     /// pixels, and returns the RGBA pixels with the background made
@@ -441,6 +444,34 @@ impl Renderer {
         pixels
     }
 
+    /// Where the viewport camera is in the scene.
+    fn eye(&self) -> glam::Vec3 {
+        self.orbit_target
+            + self.orbit_distance
+                * glam::Vec3::new(
+                    self.orbit_pitch.cos() * self.orbit_yaw.sin(),
+                    self.orbit_pitch.sin(),
+                    self.orbit_pitch.cos() * self.orbit_yaw.cos(),
+                )
+    }
+
+    /// Adds a scene camera, drawn as `mesh` (a small camera shape), placed
+    /// where the viewport camera is and looking the way it looks, as
+    /// Blender's "camera to view" does. The shape is sized to the viewing
+    /// distance so it stays visible. Returns its index, its placement matrix
+    /// and its colour. The active object does not change.
+    pub fn add_camera_at_view(
+        &mut self,
+        mesh: crate::geometry::mesh::MeshData,
+    ) -> (usize, glam::Mat4, [f32; 4]) {
+        const CAMERA_COLOR: [f32; 4] = [0.75, 0.75, 0.78, 1.0];
+        let placed =
+            glam::Mat4::look_at_rh(self.eye(), self.orbit_target, glam::Vec3::Y).inverse();
+        let model = placed * glam::Mat4::from_scale(glam::Vec3::splat(self.orbit_distance * 0.06));
+        let index = self.add_object(mesh, model, CAMERA_COLOR);
+        (index, model, CAMERA_COLOR)
+    }
+
     /// Adds another object to the scene and returns its index. Section 5c
     /// will use this for the add-model action.
     pub fn add_object(
@@ -475,7 +506,7 @@ impl Renderer {
         mesh: crate::geometry::mesh::MeshData,
         screen_x: f32,
         screen_y: f32,
-            ) -> Option<(usize, glam::Mat4)> {
+        ) -> Option<(usize, glam::Mat4, [f32; 4])> {
         let centre = self.screen_to_view_plane(screen_x, screen_y, self.orbit_target)?;
         let positions = &self.objects[0].mesh_data.positions;
         let mut size = 1.0_f32;
@@ -493,7 +524,7 @@ impl Renderer {
             * glam::Mat4::from_scale(glam::Vec3::splat(size));
         let colour = OBJECT_COLORS[self.objects.len() % OBJECT_COLORS.len()];
         let index = self.add_object(mesh, model, colour);
-        Some((index, model))
+        Some((index, model, colour))
     }
 
 
@@ -584,15 +615,8 @@ impl Renderer {
             glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 0.1, 100.0);
 
         let target = self.orbit_target;
-        let eye = target
-            + self.orbit_distance
-                * glam::Vec3::new(
-                    self.orbit_pitch.cos() * self.orbit_yaw.sin(),
-                    self.orbit_pitch.sin(),
-                    self.orbit_pitch.cos() * self.orbit_yaw.cos(),
-                );
+        let eye = self.eye();
         let view_matrix = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
-
         // Each object's own placement is applied in the shader (scene.model),
         // so this is just the camera.
         let view_proj = projection * view_matrix;
@@ -614,9 +638,10 @@ impl Renderer {
                 light_dir,
                 light_color: [1.0, 1.0, 1.0, 1.0],
                 base_color: object.base_color,
-                material: [0.4, 0.2, 0.0, 0.0],
+                material: object.material,
+                camera_pos: [eye.x, eye.y, eye.z, 1.0],
             };
-            self.queue.write_buffer(
+                self.queue.write_buffer(
                 &object.uniform_buffer,
                 0,
                 bytemuck::cast_slice(&[scene_uniform]),
@@ -1001,6 +1026,24 @@ impl Renderer {
         }
     }
 
+    /// Sets how the object at `index` looks. The scene holds the real
+    /// material; this is its GPU-side copy. False, changing nothing, if
+    /// there is no such object.
+    pub fn set_object_material(
+        &mut self,
+        index: usize,
+        material: &crate::scene::material::Material,
+    ) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) => {
+                let c = material.base_color;
+                object.base_color = [c[0], c[1], c[2], 1.0];
+                object.material = material.shader_values();
+                true
+            }
+            None => false,
+        }
+    }
         pub fn pick_inside(&self, screen_x: f32, screen_y: f32) -> Option<glam::Vec3> {
         let ray = crate::render::picking::Ray::from_screen(
             screen_x,

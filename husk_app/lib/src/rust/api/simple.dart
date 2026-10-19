@@ -314,6 +314,61 @@ double angleDifference({required double from, required double to}) =>
 ((double, double, double), (double, double, double), (double, double, double))
 activeObjectAxes() => RustLib.instance.api.crateApiSimpleActiveObjectAxes();
 
+/// The active object's material.
+ObjectMaterial activeObjectMaterial() =>
+    RustLib.instance.api.crateApiSimpleActiveObjectMaterial();
+
+/// Sets the active object's material and redraws it. Values outside 0 to 1
+/// are held inside it. Returns false, changing nothing, for any value that
+/// is not a finite number.
+bool setActiveObjectMaterial({required ObjectMaterial material}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleSetActiveObjectMaterial(material: material);
+
+/// Adds a scene camera where the viewport is looking from, pointing the
+/// way the viewport looks. Returns its index. The active object does not
+/// change.
+BigInt? addCamera() => RustLib.instance.api.crateApiSimpleAddCamera();
+
+/// The active object's vertical field of view in degrees, if it is a
+/// camera; None for anything else.
+double? activeCameraFov() =>
+    RustLib.instance.api.crateApiSimpleActiveCameraFov();
+
+/// Sets the active camera's vertical field of view (held between 10 and
+/// 120 degrees). False, changing nothing, if the active object is not a
+/// camera or the value is not a finite number.
+bool setActiveCameraFov({required double degrees}) =>
+    RustLib.instance.api.crateApiSimpleSetActiveCameraFov(degrees: degrees);
+
+/// How an object's surface looks, as the Properties panel shows it:
+/// colour (red, green, blue, each 0 to 1), roughness and metalness.
+class ObjectMaterial {
+  final (double, double, double) baseColor;
+  final double roughness;
+  final double metalness;
+
+  const ObjectMaterial({
+    required this.baseColor,
+    required this.roughness,
+    required this.metalness,
+  });
+
+  @override
+  int get hashCode =>
+      baseColor.hashCode ^ roughness.hashCode ^ metalness.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ObjectMaterial &&
+          runtimeType == other.runtimeType &&
+          baseColor == other.baseColor &&
+          roughness == other.roughness &&
+          metalness == other.metalness;
+}
+
 /// An object's placement as the Properties panel shows it: position,
 /// rotation in degrees about X, Y and Z (Blender's order) and scale.
 class ObjectTransform {

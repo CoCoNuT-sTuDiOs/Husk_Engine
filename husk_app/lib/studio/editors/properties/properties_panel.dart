@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:husk_app/src/rust/api/simple.dart' show ObjectTransform;
+import 'package:husk_app/src/rust/api/simple.dart'
+    show ObjectMaterial, ObjectTransform;
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
@@ -27,6 +28,16 @@ class PropertiesPanel extends StatelessWidget {
               title: 'Transform',
               child: _TransformSection(studio: studio),
             ),
+            if (studio.activeCameraFov == null)
+              CollapsibleSection(
+                title: 'Material',
+                child: _MaterialSection(studio: studio),
+              )
+            else
+              CollapsibleSection(
+                title: 'Camera',
+                child: _CameraSection(studio: studio),
+              ),
             CollapsibleSection(
               title: 'Skeleton',
               child: _SkeletonSection(studio: studio),
@@ -48,6 +59,201 @@ class PropertiesPanel extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _CameraSection extends StatelessWidget {
+  const _CameraSection({required this.studio});
+
+  final StudioController studio;
+
+  @override
+  Widget build(BuildContext context) {
+    final fov = studio.activeCameraFov ?? 35.0;
+    return Row(
+      children: [
+        const SizedBox(
+          width: 84,
+          child: Text('Field of view', style: HuskText.readout),
+        ),
+        Expanded(
+          child: Slider(
+            value: fov.clamp(10.0, 120.0),
+            min: 10,
+            max: 120,
+            onChanged: studio.setActiveCameraFov,
+          ),
+        ),
+        SizedBox(
+          width: 40,
+          child: Text(
+            '${fov.round()}°',
+            textAlign: TextAlign.right,
+            style: HuskText.readout,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The colours offered as one-tap swatches: Husk's own, then neutrals and
+/// earth tones.
+const List<Color> _swatches = [
+  Color(0xFFF97316),
+  Color(0xFF3B82F6),
+  Color(0xFF22C55E),
+  Color(0xFFEF4444),
+  Color(0xFFE8E8E8),
+  Color(0xFF6B6B6B),
+  Color(0xFF8B8680),
+  Color(0xFF8B5A2B),
+  Color(0xFFD9A066),
+  Color(0xFFC68642),
+  Color(0xFFF1C27D),
+  Color(0xFF3B2A20),
+];
+
+class _MaterialSection extends StatelessWidget {
+  const _MaterialSection({required this.studio});
+
+  final StudioController studio;
+
+  @override
+  Widget build(BuildContext context) {
+    final material = studio.activeMaterial;
+    final (r, g, b) = material.baseColor;
+
+    void change({
+      (double, double, double)? color,
+      double? roughness,
+      double? metalness,
+    }) {
+      studio.setActiveMaterial(
+        ObjectMaterial(
+          baseColor: color ?? material.baseColor,
+          roughness: roughness ?? material.roughness,
+          metalness: metalness ?? material.metalness,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Colour', style: HuskText.readout),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final swatch in _swatches)
+              _Swatch(
+                color: swatch,
+                onTap: () => change(color: (swatch.r, swatch.g, swatch.b)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: NumberField(
+                label: 'R',
+                labelColor: HuskColors.error,
+                value: (r * 255).roundToDouble(),
+                onChanged: (v) => change(color: (v.clamp(0.0, 255.0) / 255, g, b)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'G',
+                labelColor: HuskColors.success,
+                value: (g * 255).roundToDouble(),
+                onChanged: (v) => change(color: (r, v.clamp(0.0, 255.0) / 255, b)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'B',
+                labelColor: HuskColors.blue,
+                value: (b * 255).roundToDouble(),
+                onChanged: (v) => change(color: (r, g, v.clamp(0.0, 255.0) / 255)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _LabelledSlider(
+          label: 'Roughness',
+          value: material.roughness,
+          onChanged: (v) => change(roughness: v),
+        ),
+        _LabelledSlider(
+          label: 'Metalness',
+          value: material.metalness,
+          onChanged: (v) => change(metalness: v),
+        ),
+      ],
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({required this.color, required this.onTap});
+
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: HuskColors.border),
+        ),
+      ),
+    );
+  }
+}
+
+class _LabelledSlider extends StatelessWidget {
+  const _LabelledSlider({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(width: 74, child: Text(label, style: HuskText.readout)),
+        Expanded(
+          child: Slider(value: value.clamp(0.0, 1.0), onChanged: onChanged),
+        ),
+        SizedBox(
+          width: 36,
+          child: Text(
+            value.toStringAsFixed(2),
+            textAlign: TextAlign.right,
+            style: HuskText.readout,
+          ),
+        ),
+      ],
     );
   }
 }

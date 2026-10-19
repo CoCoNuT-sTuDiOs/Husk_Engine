@@ -124,6 +124,39 @@ BigInt? get selectedBone => _selectedBone;
     return index;
   }
 
+  /// Adds a scene camera where the viewport is looking from. Returns a
+  /// message when it could not be added.
+  String? addCamera() {
+    final index = rust.addCamera();
+    if (index == null) return 'Could not add a camera';
+    notifyListeners();
+    return null;
+  }
+
+  /// The active object's field of view in degrees if it is a camera,
+  /// otherwise null.
+  double? get activeCameraFov => rust.activeCameraFov();
+
+  /// Sets the active camera's field of view. Returns false if the engine
+  /// refused it (the active object is not a camera).
+  bool setActiveCameraFov(double degrees) {
+    final applied = rust.setActiveCameraFov(degrees: degrees);
+    if (applied) notifyListeners();
+    return applied;
+  }
+
+  /// The active object's material. The Rust core owns it; this only reads
+  /// it.
+  rust.ObjectMaterial get activeMaterial => rust.activeObjectMaterial();
+
+  /// Applies [material] to the active object. Returns false if the engine
+  /// refused it (a value that is not a finite number).
+  bool setActiveMaterial(rust.ObjectMaterial material) {
+    final applied = rust.setActiveObjectMaterial(material: material);
+    if (applied) notifyListeners();
+    return applied;
+  }
+
   /// The active object's own X, Y and Z axes as directions in the scene.
   List<(double, double, double)> get activeLocalAxes {
     final (x, y, z) = rust.activeObjectAxes();
