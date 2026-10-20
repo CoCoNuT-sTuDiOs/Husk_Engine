@@ -110,6 +110,15 @@ class ViewportToolStrip extends StatelessWidget {
               ..._options(context, studio),
               const Spacer(),
               IconAction(
+                selected: studio.cameraView,
+                icon: PhosphorIcon(PhosphorIconsRegular.videoCamera),
+                tooltip: studio.cameraView
+                    ? 'Leave camera view'
+                    : 'Look through the scene camera',
+                onPressed: () => actions.toggleCameraView(context),
+              ),
+              const SizedBox(width: 6),
+              IconAction(
                 icon: PhosphorIcon(
                   maximized
                       ? PhosphorIconsRegular.arrowsIn

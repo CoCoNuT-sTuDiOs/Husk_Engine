@@ -14,6 +14,18 @@ var<uniform> scene: SceneUniform;
 @group(1) @binding(0)
 var<storage, read> bone_matrices: array<mat4x4<f32>>;
 
+struct GpuLight {
+    position: vec4<f32>,
+    direction: vec4<f32>,
+    color: vec4<f32>,
+};
+
+struct LightsUniform {
+    count: vec4<u32>,
+    items: array<GpuLight, 8>,
+};
+@group(2) @binding(0)
+var<uniform> lights: LightsUniform;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -95,38 +107,89 @@ fn studio_environment(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     return colour;
 }
 
+// What one light does to the surface: a soft diffuse part (rougher
+// surfaces soften the edge of the shading) and a highlight. `l` points
+// from the surface towards the light, `radiance` is the light's colour
+// times its strength where it arrives.
+fn direct_light(
+    n: vec3<f32>,
+    v: vec3<f32>,
+    l: vec3<f32>,
+    radiance: vec3<f32>,
+    albedo: vec3<f32>,
+    roughness: f32,
+    metalness: f32,
+    f0: vec3<f32>,
+) -> vec3<f32> {
+    let h = normalize(l + v);
+    let n_dot_v = max(dot(n, v), 0.0001);
+    let n_dot_l = max(dot(n, l), 0.0);
+    let n_dot_h = max(dot(n, h), 0.0);
+    let v_dot_h = max(dot(v, h), 0.0);
+
+    let fresnel = fresnel_schlick(v_dot_h, f0);
+
+    let wrap = roughness * 0.5;
+    let wrapped = max((dot(n, l) + wrap) / (1.0 + wrap), 0.0);
+    let k_diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metalness);
+    let diffuse_direct = albedo * k_diffuse * wrapped * radiance;
+
+    let a = roughness * roughness;
+    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+    let geometry = geometry_schlick(n_dot_v, k) * geometry_schlick(n_dot_l, k);
+    let specular_direct = distribution_ggx(n_dot_h, a) * geometry * fresnel * PI
+        / (4.0 * n_dot_v) * radiance;
+
+    return diffuse_direct + specular_direct;
+}
+
+// Squeezes bright values towards 1 instead of cutting them off, so
+// several lights add up without turning flat white. Everything below the
+// knee is left exactly as it was.
+fn soft_clip(c: vec3<f32>) -> vec3<f32> {
+    let knee = 0.8;
+    let over = max(c - vec3<f32>(knee), vec3<f32>(0.0));
+    let shoulder = vec3<f32>(knee)
+        + (1.0 - knee) * (vec3<f32>(1.0) - exp(-over / (1.0 - knee)));
+    return select(shoulder, c, c <= vec3<f32>(knee));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let v = normalize(scene.camera_pos.xyz - in.world_position);
-    let l = normalize(-scene.light_dir.xyz);
-    let h = normalize(l + v);
 
     let albedo = scene.base_color.rgb;
     let roughness = clamp(scene.material.x, 0.05, 1.0);
     let metalness = clamp(scene.material.y, 0.0, 1.0);
 
     let n_dot_v = max(dot(n, v), 0.0001);
-    let n_dot_l = max(dot(n, l), 0.0);
-    let n_dot_h = max(dot(n, h), 0.0);
-    let v_dot_h = max(dot(v, h), 0.0);
 
     // Non-metals reflect about 4 percent head-on; metals reflect their colour.
     let f0 = mix(vec3<f32>(0.04), albedo, metalness);
-    let fresnel = fresnel_schlick(v_dot_h, f0);
 
-    // The light that follows the camera: a soft diffuse part (rougher
-    // surfaces soften the edge of the shading) and a highlight.
-    let wrap = roughness * 0.5;
-    let wrapped = max((dot(n, l) + wrap) / (1.0 + wrap), 0.0);
-    let k_diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metalness);
-    let diffuse_direct = albedo * k_diffuse * wrapped * scene.light_color.rgb;
-
-    let a = roughness * roughness;
-    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-    let geometry = geometry_schlick(n_dot_v, k) * geometry_schlick(n_dot_l, k);
-    let specular_direct = distribution_ggx(n_dot_h, a) * geometry * fresnel * PI
-        / (4.0 * n_dot_v) * scene.light_color.rgb;
+    // With no lights in the scene, the light that follows the camera shines.
+    // Once there are lights, they replace it.
+    var direct = vec3<f32>(0.0);
+    if (lights.count.x == 0u) {
+        let l = normalize(-scene.light_dir.xyz);
+        direct = direct_light(n, v, l, scene.light_color.rgb, albedo, roughness, metalness, f0);
+    } else {
+        for (var i = 0u; i < lights.count.x; i = i + 1u) {
+            let light = lights.items[i];
+            var l = normalize(-light.direction.xyz);
+            var radiance = light.color.rgb;
+            // A point light shines from where it sits and fades with the
+            // square of the distance (held above 0.1, as in the scene code).
+            if (light.position.w > 0.5) {
+                let to_light = light.position.xyz - in.world_position;
+                let dist = max(length(to_light), 0.1);
+                l = to_light / dist;
+                radiance = radiance / (dist * dist);
+            }
+            direct = direct + direct_light(n, v, l, radiance, albedo, roughness, metalness, f0);
+        }
+    }
 
     // The studio around the object: soft light on the surface, and its
     // reflection, which is what makes metal look like metal.
@@ -140,6 +203,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         + (max(vec3<f32>(1.0 - roughness), f0) - f0) * pow(1.0 - n_dot_v, 5.0);
     let specular_ambient = environment * f_environment;
 
-    let lit_color = diffuse_direct + specular_direct + diffuse_ambient + specular_ambient;
+    let lit_color = soft_clip(direct + diffuse_ambient + specular_ambient);
     return vec4<f32>(lit_color, 1.0);
 }

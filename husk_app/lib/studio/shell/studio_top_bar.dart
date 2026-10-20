@@ -85,7 +85,15 @@ class StudioTopBar extends StatelessWidget {
                       menuChildren: [
                         MenuItemButton(
                           onPressed: () => actions.addCamera(context),
-                          child: const Text('Camera'),
+                            child: const Text('Camera'),
+                        ),
+                        MenuItemButton(
+                          onPressed: () => actions.addLight(context, 'sun'),
+                          child: const Text('Sun'),
+                        ),
+                        MenuItemButton(
+                          onPressed: () => actions.addLight(context, 'point'),
+                          child: const Text('Point light'),
                         ),
                       ],
                       child: const Text('Add'),

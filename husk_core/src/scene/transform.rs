@@ -26,6 +26,12 @@ impl Transform {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
 
+    /// Where the object sits and which way it faces, without its scale:
+    /// what a camera needs.
+    pub fn placement_matrix(&self) -> Mat4 {
+        Mat4::from_rotation_translation(self.rotation, self.translation)
+    }
+
     /// Splits a placement matrix back into its parts. The matrix must be
     /// made of a scale, a rotation and a move only (no shear).
     pub fn from_matrix(matrix: Mat4) -> Transform {
@@ -181,8 +187,23 @@ assert!((a - b).length() < 1e-4, "{a:?} is not close to {b:?}");
 
 
     #[test]
+    fn the_placement_matrix_keeps_position_and_facing_but_drops_the_scale() {
+        let mut t = Transform::default();
+        t.translation = Vec3::new(1.0, 2.0, 3.0);
+        t.rotation = Quat::from_rotation_y(90f32.to_radians());
+        t.scale = Vec3::new(4.0, 5.0, 6.0);
+        let m = t.placement_matrix();
+        assert_close(m.transform_point3(Vec3::ZERO), Vec3::new(1.0, 2.0, 3.0));
+        // A camera looks along its own -Z, which a quarter turn about Y
+        // sends to -X.
+        assert_close(m.transform_vector3(-Vec3::Z), -Vec3::X);
+        // No scale: lengths are kept.
+        assert!((m.transform_vector3(Vec3::X).length() - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
     fn local_axes_follow_the_rotation_and_ignore_the_scale() {
-        let plain = Transform::default().local_axes();
+    let plain = Transform::default().local_axes();
         assert_close(plain[0], Vec3::X);
         assert_close(plain[1], Vec3::Y);
         assert_close(plain[2], Vec3::Z);

@@ -12,9 +12,6 @@ import 'package:husk_app/studio/state/timeline_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/typing.dart';
 
-/// The Husk Studio window layout (Blender-style): top bar with menus, tool
-/// column on the left, viewport in the middle with the timeline under it,
-/// and the outliner and properties on the right.
 class StudioShell extends StatefulWidget {
   const StudioShell({super.key});
 
@@ -53,6 +50,15 @@ class _StudioShellState extends State<StudioShell> {
   /// The window-wide shortcuts. Each one runs the same command as its menu
   /// entry.
   bool _handleKey(KeyEvent event) {
+// Space on its own plays and pauses the animation (Ctrl+Space, below,
+    // maximizes the viewport).
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.space &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !isTyping()) {
+      _actions.togglePlay(context);
+      return true;
+    }
     if (!HardwareKeyboard.instance.isControlPressed) return false;
     final key = event.logicalKey;
         if (key == LogicalKeyboardKey.keyZ &&

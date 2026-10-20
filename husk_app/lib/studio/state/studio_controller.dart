@@ -112,9 +112,6 @@ BigInt? get selectedBone => _selectedBone;
     return null;
   }
 
-  /// Makes the object under render pixel (x, y) the active one, so the
-  /// bone and animation tools act on it. Returns its index, or null when
-  /// the click hit no object.
   BigInt? selectObjectAt(double x, double y) {
     final index = rust.selectObjectAt(x: x, y: y);
     if (index == null) return null;
@@ -124,6 +121,37 @@ BigInt? get selectedBone => _selectedBone;
     return index;
   }
 
+  /// True while the viewport looks through the scene camera.
+  bool get cameraView => rust.cameraViewActive();
+
+  /// Starts or stops looking through the scene camera. Returns a message
+  /// when there is no camera to look through.
+  String? toggleCameraView() {
+    final wanted = !rust.cameraViewActive();
+    final active = rust.setCameraView(on_: wanted);
+    notifyListeners();
+    if (wanted && !active) return 'Add a camera first (Add > Camera)';
+    return null;
+  }
+
+  /// Leaves camera view. Orbiting or zooming the viewport does this, since
+  /// they move the viewport's own camera.
+  void leaveCameraView() {
+    if (!rust.cameraViewActive()) return;
+    rust.setCameraView(on_: false);
+    notifyListeners();
+  }
+
+  /// The finished video's width, height (pixels) and frame rate.
+  (int, int, int) get outputSettings => rust.outputSettings();
+
+  /// Sets the finished video's width, height and frame rate. The engine
+  /// holds them inside their ranges and makes the sides even.
+  void setOutputSettings(int width, int height, int fps) {
+    rust.setOutputSettings(width: width, height: height, fps: fps);
+    notifyListeners();
+  }
+
   /// Adds a scene camera where the viewport is looking from. Returns a
   /// message when it could not be added.
   String? addCamera() {
@@ -131,6 +159,28 @@ BigInt? get selectedBone => _selectedBone;
     if (index == null) return 'Could not add a camera';
     notifyListeners();
     return null;
+  }
+
+  /// Adds a light ('sun' or 'point') and makes it the active object, so the
+  /// Properties panel shows it. Returns a message when it could not be added.
+  String? addLight(String kind) {
+    final index = rust.addLight(kind: kind);
+    if (index == null) return 'Could not add a $kind light';
+    selectObject(index.toInt());
+    notifyListeners();
+    return null;
+  }
+
+  /// The active object's light if it is a light, otherwise null. The Rust
+  /// core owns it; this only reads it.
+  rust.ObjectLight? get activeLight => rust.activeLight();
+
+  /// Sets the active light's colour and intensity. Returns false if the
+  /// engine refused it (the active object is not a light).
+  bool setActiveLight((double, double, double) color, double intensity) {
+    final applied = rust.setActiveLight(color: color, intensity: intensity);
+    if (applied) notifyListeners();
+    return applied;
   }
 
   /// The active object's field of view in degrees if it is a camera,

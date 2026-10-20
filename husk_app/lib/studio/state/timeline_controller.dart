@@ -3,9 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:husk_app/src/rust/api/simple.dart' as rust;
 
-/// The timeline's interface state: the playhead, play and pause, and a
-/// cached copy of the keys for drawing. The keys themselves live in the
-/// Rust core.
 class TimelineController extends ChangeNotifier {
   /// TEMPORARY: one fixed project file, like the old canvas. A file picker
   /// arrives with Section 8.

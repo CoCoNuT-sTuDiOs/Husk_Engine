@@ -1,6 +1,8 @@
 pub mod transform;
 pub mod camera;
 pub mod material;
+pub mod output;
+pub mod light;
 use crate::rig::Skeleton;
 use crate::rig::skinning::VertexWeights;
 use std::ops::{Deref, DerefMut};
@@ -13,8 +15,8 @@ pub enum ObjectKind {
     #[default]
     Mesh,
     Camera(camera::Camera),
+    Light(light::Light),
 }
-
 /// Everything that belongs to one animated thing in a scene.
 #[derive(Default)]
 pub struct Object {
@@ -38,6 +40,8 @@ pub struct Object {
 pub struct Scene {
     pub objects: Vec<Object>,
     pub active_object: usize,
+    /// What the finished video looks like.
+    pub output: output::Output,
 }
 
 impl Scene {
@@ -92,12 +96,44 @@ impl Scene {
             _ => false,
         }
     }
+
+    /// Sets the light of the object at `index`. False, changing nothing, if
+    /// there is no such object or it is not a light.
+    pub fn set_light(&mut self, index: usize, light: light::Light) -> bool {
+        match self.objects.get_mut(index) {
+            Some(Object {
+                kind: ObjectKind::Light(current),
+                ..
+            }) => {
+                *current = light;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The scene's lights, in list order, each with its transform: the
+    /// ones the renderer shines, at most `light::MAX_LIGHTS`.
+    pub fn lights(&self) -> Vec<(transform::Transform, light::Light)> {
+        self.objects
+            .iter()
+            .filter_map(|object| match object.kind {
+                ObjectKind::Light(light) => Some((object.transform, light)),
+                _ => None,
+            })
+            .take(light::MAX_LIGHTS)
+            .collect()
+    }
+
+    /// The index of the scene camera: the first camera in the list, which
+    /// is the one the viewport looks through in camera view.
+    pub fn first_camera(&self) -> Option<usize> {
+        self.objects
+            .iter()
+            .position(|object| matches!(object.kind, ObjectKind::Camera(_)))
+    }
 }
 
-/// Which index is active once `removed` has been taken out of the list:
-/// objects after it shift down by one, and if the active object itself
-/// went, object 0 takes over. The renderer uses this too, so both lists
-/// always agree.
 pub fn active_after_removal(active: usize, removed: usize) -> usize {
     if active == removed {
         0
@@ -281,7 +317,7 @@ pub fn active_camera() -> Option<camera::Camera> {
     let scene = guard.scenes.get(guard.active_scene)?;
     match scene.objects.get(scene.active_object)?.kind {
         ObjectKind::Camera(lens) => Some(lens),
-        ObjectKind::Mesh => None,
+        ObjectKind::Mesh | ObjectKind::Light(_) => None,
     }
 }
 
@@ -296,6 +332,69 @@ pub fn set_active_camera(lens: camera::Camera) -> bool {
             scene.set_camera(index, lens)
         }
         None => false,
+    }
+}
+
+/// The scene camera's placement and lens, if the scene has a camera.
+pub fn scene_camera() -> Option<(transform::Transform, camera::Camera)> {
+    let guard = PROJECT.lock().unwrap();
+    let scene = guard.scenes.get(guard.active_scene)?;
+    let object = scene.objects.get(scene.first_camera()?)?;
+    match object.kind {
+        ObjectKind::Camera(lens) => Some((object.transform, lens)),
+        ObjectKind::Mesh | ObjectKind::Light(_) => None,
+    }
+}
+
+/// The active object's light, if the active object is a light.
+pub fn active_light() -> Option<light::Light> {
+    let guard = PROJECT.lock().unwrap();
+    let scene = guard.scenes.get(guard.active_scene)?;
+    match scene.objects.get(scene.active_object)?.kind {
+        ObjectKind::Light(light) => Some(light),
+        ObjectKind::Mesh | ObjectKind::Camera(_) => None,
+    }
+}
+
+/// Sets the active object's light. False, changing nothing, if the active
+/// object is not a light.
+pub fn set_active_light(light: light::Light) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => {
+            let index = scene.active_object;
+            scene.set_light(index, light)
+        }
+        None => false,
+    }
+}
+
+/// The active scene's lights and where they are (see `Scene::lights`).
+pub fn scene_lights() -> Vec<(transform::Transform, light::Light)> {
+    let guard = PROJECT.lock().unwrap();
+    guard
+        .scenes
+        .get(guard.active_scene)
+        .map_or_else(Vec::new, |scene| scene.lights())
+}
+
+/// What the finished video looks like: its size and frame rate.
+pub fn output() -> output::Output {
+let guard = PROJECT.lock().unwrap();
+    guard
+        .scenes
+        .get(guard.active_scene)
+        .map_or_else(output::Output::default, |scene| scene.output)
+}
+
+/// Sets what the finished video looks like. The settings are kept as given;
+/// hold them inside their ranges first (`Output::clamped`).
+pub fn set_output(settings: output::Output) {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.output = settings;
     }
 }
 
@@ -389,6 +488,55 @@ let mut scene = Scene::default();
         assert!(!scene.set_camera(2, wide));
         assert_eq!(scene.objects[2].kind, ObjectKind::Mesh);
         assert!(!scene.set_camera(9, wide));
+    }
+
+    #[test]
+    fn set_light_changes_a_light_and_nothing_else() {
+        let mut scene = scene_with(3, 1);
+        scene.objects[1].kind = ObjectKind::Light(light::Light::sun());
+        let lamp = light::Light::point();
+        assert!(scene.set_light(1, lamp));
+        assert_eq!(scene.objects[1].kind, ObjectKind::Light(lamp));
+        // A mesh is not a light, and 9 is not an object.
+        assert!(!scene.set_light(2, lamp));
+        assert_eq!(scene.objects[2].kind, ObjectKind::Mesh);
+        assert!(!scene.set_light(9, lamp));
+    }
+
+    #[test]
+    fn the_scene_lights_are_the_light_objects_in_order_and_stop_at_the_cap() {
+        let mut scene = scene_with(12, 0);
+        assert!(scene.lights().is_empty());
+        scene.objects[3].kind = ObjectKind::Light(light::Light::point());
+        scene.objects[3].transform.translation = glam::Vec3::new(1.0, 2.0, 3.0);
+        scene.objects[1].kind = ObjectKind::Light(light::Light::sun());
+        // A camera is not a light.
+        scene.objects[2].kind = ObjectKind::Camera(camera::Camera::default());
+        let lights = scene.lights();
+        assert_eq!(lights.len(), 2);
+        assert_eq!(lights[0].1, light::Light::sun());
+        assert_eq!(lights[1].1, light::Light::point());
+        assert_eq!(lights[1].0.translation, glam::Vec3::new(1.0, 2.0, 3.0));
+
+        // Eleven lights in the list: only the first eight shine.
+        for object in scene.objects.iter_mut().skip(1) {
+            object.kind = ObjectKind::Light(light::Light::point());
+        }
+        assert_eq!(scene.lights().len(), light::MAX_LIGHTS);
+    }
+
+    #[test]
+    fn the_scene_camera_is_the_first_camera_in_the_list() {
+    let mut scene = scene_with(4, 0);
+        assert_eq!(scene.first_camera(), None);
+        scene.objects[3].kind = ObjectKind::Camera(camera::Camera::default());
+        assert_eq!(scene.first_camera(), Some(3));
+        scene.objects[2].kind = ObjectKind::Camera(camera::Camera::default());
+        assert_eq!(scene.first_camera(), Some(2));
+        // Removing the first camera hands over to the next one, which moves
+        // down into its place.
+        assert!(scene.remove_object(2));
+        assert_eq!(scene.first_camera(), Some(2));
     }
 
     #[test]

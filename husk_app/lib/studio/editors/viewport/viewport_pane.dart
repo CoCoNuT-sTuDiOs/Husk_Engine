@@ -4,7 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:husk_app/studio/editors/viewport/frame_overlay.dart';
 import 'package:husk_app/studio/editors/viewport/gizmo_overlay.dart';
+import 'package:husk_app/studio/editors/viewport/maximized_bar.dart';
 import 'package:husk_app/studio/editors/viewport/skeleton_overlay.dart';
 import 'package:husk_app/studio/editors/viewport/viewport_tool_strip.dart';
 import 'package:husk_app/studio/state/studio_actions.dart';
@@ -148,12 +150,14 @@ class _ViewportPaneState extends State<ViewportPane> {
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.minus ||
         key == LogicalKeyboardKey.numpadSubtract) {
+      _studio.leaveCameraView();
       _viewport.zoom(1.08); // zoom out
       return true;
     }
     if (key == LogicalKeyboardKey.equal ||
         key == LogicalKeyboardKey.add ||
         key == LogicalKeyboardKey.numpadAdd) {
+      _studio.leaveCameraView();
       _viewport.zoom(1 / 1.08); // zoom in
       return true;
     }
@@ -166,6 +170,7 @@ class _ViewportPaneState extends State<ViewportPane> {
   void _handlePointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent) {
       // Scrolling down moves the camera away, scrolling up brings it closer.
+      _studio.leaveCameraView();
       _viewport.zoom(event.scrollDelta.dy > 0 ? 1.08 : 1 / 1.08);
     }
   }
@@ -246,6 +251,7 @@ class _ViewportPaneState extends State<ViewportPane> {
     if (joint == null) {
       // Degrees-per-pixel-dragged, converted to radians for the engine.
       const dragSensitivity = 0.01;
+      _studio.leaveCameraView();
       _viewport.orbit(
         details.delta.dx * dragSensitivity,
         -details.delta.dy * dragSensitivity,
@@ -475,6 +481,15 @@ class _ViewportPaneState extends State<ViewportPane> {
                 Texture(textureId: textureId),
                 IgnorePointer(
                   child: CustomPaint(
+                    painter: FrameOverlayPainter(
+                      viewport: _viewport,
+                      renderWidth: _renderSize.width,
+                      repaint: _overlayTick,
+                    ),
+                  ),
+                ),
+                IgnorePointer(
+                  child: CustomPaint(
                     painter: SkeletonOverlayPainter(
                       viewport: _viewport,
                       studio: _studio,
@@ -534,7 +549,21 @@ class _ViewportPaneState extends State<ViewportPane> {
                 ? const Center(
                     child: CircularProgressIndicator(color: HuskColors.orange),
                   )
-                : _buildRender(context, textureId),
+                          : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _buildRender(context, textureId),
+                      if (_studio.viewportMaximized)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 12,
+                          child: Center(
+                            child: MaximizedBar(actions: widget.actions),
+                          ),
+                        ),
+                    ],
+                  ),
           ),
         ),
       ],

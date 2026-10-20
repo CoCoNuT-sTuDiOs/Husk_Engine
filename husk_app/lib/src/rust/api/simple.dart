@@ -6,6 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`
+
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
 
@@ -15,12 +17,6 @@ String greet({required String name}) =>
 (double, double, double)? pick({required double x, required double y}) =>
     RustLib.instance.api.crateApiSimplePick(x: x, y: y);
 
-/// Casts a ray from a screen-space point and, if it hits the mesh, places
-/// a new bone there in the current skeleton. If `parent` is given, the
-/// new bone becomes that bone's child (its position is stored relative
-/// to the parent, per the skeleton's bind-pose convention); otherwise
-/// it's a new root bone. Returns the new bone's index and world-space
-/// position, or `None` if the click missed the mesh.
 (BigInt, double, double, double)? placeBone({
   required double x,
   required double y,
@@ -341,6 +337,94 @@ double? activeCameraFov() =>
 /// camera or the value is not a finite number.
 bool setActiveCameraFov({required double degrees}) =>
     RustLib.instance.api.crateApiSimpleSetActiveCameraFov(degrees: degrees);
+
+/// Adds a light of the given kind ("sun" or "point", any letter case),
+/// above and beside what the viewport is looking at and facing it.
+/// Returns its index, or None for an unknown kind. The active object does
+/// not change.
+BigInt? addLight({required String kind}) =>
+    RustLib.instance.api.crateApiSimpleAddLight(kind: kind);
+
+/// The active object's light, if it is a light; None for anything else.
+ObjectLight? activeLight() => RustLib.instance.api.crateApiSimpleActiveLight();
+
+/// Sets the active light's colour and intensity (held inside their
+/// ranges). The kind (sun or point) stays as it is. False, changing
+/// nothing, if the active object is not a light or a value is not a
+/// finite number.
+bool setActiveLight({
+  required (double, double, double) color,
+  required double intensity,
+}) => RustLib.instance.api.crateApiSimpleSetActiveLight(
+  color: color,
+  intensity: intensity,
+);
+
+/// Starts or stops looking through the scene camera (the first camera in
+/// the scene). Returns whether the viewport is looking through it now:
+/// false when asked to start but the scene has no camera.
+bool setCameraView({required bool on_}) =>
+    RustLib.instance.api.crateApiSimpleSetCameraView(on_: on_);
+
+/// Whether the viewport is looking through the scene camera.
+bool cameraViewActive() =>
+    RustLib.instance.api.crateApiSimpleCameraViewActive();
+
+/// While looking through the scene camera: where the output frame sits in
+/// the viewport, as (x, y, width, height) in render pixels. None otherwise.
+(double, double, double, double)? cameraFrameRect() =>
+    RustLib.instance.api.crateApiSimpleCameraFrameRect();
+
+/// The finished video's width, height (pixels) and frame rate.
+(int, int, int) outputSettings() =>
+    RustLib.instance.api.crateApiSimpleOutputSettings();
+
+/// Sets the finished video's width, height and frame rate. Sizes are held
+/// between 16 and 7680 and made even, and the rate between 1 and 120.
+/// Returns the values that were kept.
+(int, int, int) setOutputSettings({
+  required int width,
+  required int height,
+  required int fps,
+}) => RustLib.instance.api.crateApiSimpleSetOutputSettings(
+  width: width,
+  height: height,
+  fps: fps,
+);
+
+/// A light as the Properties panel shows it: sun or point, colour (red,
+/// green, blue, each 0 to 1), intensity, and the top of the intensity
+/// range for this kind of light.
+class ObjectLight {
+  final bool isSun;
+  final (double, double, double) color;
+  final double intensity;
+  final double maxIntensity;
+
+  const ObjectLight({
+    required this.isSun,
+    required this.color,
+    required this.intensity,
+    required this.maxIntensity,
+  });
+
+  @override
+  int get hashCode =>
+      isSun.hashCode ^
+      color.hashCode ^
+      intensity.hashCode ^
+      maxIntensity.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ObjectLight &&
+          runtimeType == other.runtimeType &&
+          isSun == other.isSun &&
+          color == other.color &&
+          intensity == other.intensity &&
+          maxIntensity == other.maxIntensity;
+}
 
 /// How an object's surface looks, as the Properties panel shows it:
 /// colour (red, green, blue, each 0 to 1), roughness and metalness.

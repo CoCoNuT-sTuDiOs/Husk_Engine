@@ -1,6 +1,8 @@
 use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
 
+use crate::scene::light::MAX_LIGHTS;
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -65,6 +67,57 @@ struct SceneUniform {
     camera_pos: [f32; 4],
 }
 
+/// One light as the shader reads it. `position.w` is 0 for a sun and 1
+/// for a point light. `direction` is the way the light's rays travel (a
+/// sun's only direction). `color` is the light's colour times its
+/// intensity.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuLight {
+    position: [f32; 4],
+    direction: [f32; 4],
+    color: [f32; 4],
+}
+
+/// Every light the shader shines: how many are in use (in `count[0]`),
+/// then the lights. With none in use the shader falls back to the light
+/// that follows the camera.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct LightsUniform {
+    count: [u32; 4],
+    items: [GpuLight; MAX_LIGHTS],
+}
+
+/// Packs the scene's lights for the shader. Lights past `MAX_LIGHTS` are
+/// left out.
+fn lights_uniform(
+    lights: &[(crate::scene::transform::Transform, crate::scene::light::Light)],
+) -> LightsUniform {
+    let mut uniform: LightsUniform = bytemuck::Zeroable::zeroed();
+    for (transform, light) in lights.iter().take(MAX_LIGHTS) {
+        let slot = uniform.count[0] as usize;
+        let position = transform.translation;
+        let direction = crate::scene::light::shine_direction(transform);
+        let kind = match light.kind {
+            crate::scene::light::LightKind::Sun => 0.0,
+            crate::scene::light::LightKind::Point => 1.0,
+        };
+        uniform.items[slot] = GpuLight {
+            position: [position.x, position.y, position.z, kind],
+            direction: [direction.x, direction.y, direction.z, 0.0],
+            color: [
+                light.color[0] * light.intensity,
+                light.color[1] * light.intensity,
+                light.color[2] * light.intensity,
+                0.0,
+            ],
+        };
+        uniform.count[0] += 1;
+    }
+    uniform
+}
+
 /// One drawable thing in the scene: its own geometry, its own bone
 /// matrices, and its own placement and colour.
 struct RenderObject {
@@ -81,6 +134,16 @@ struct RenderObject {
     // Roughness, metalness and two unused values, as the shader reads them.
     material: [f32; 4],
 }
+/// A scene camera as the renderer needs it: where it sits and faces (no
+/// scale), its vertical field of view, and the shape (width / height) of
+/// the output frame it is framed for.
+#[derive(Clone, Copy, Debug)]
+pub struct CameraView {
+    pub world: glam::Mat4,
+    pub fov_degrees: f32,
+    pub frame_aspect: f32,
+}
+
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -95,6 +158,8 @@ pub struct Renderer {
     active_object: usize,
     bind_group_layout: wgpu::BindGroupLayout,
     bone_bind_group_layout: wgpu::BindGroupLayout,
+    lights_buffer: wgpu::Buffer,
+    lights_bind_group: wgpu::BindGroup,
     frame_time_total: Duration,
     frame_time_count: u32,
     #[allow(dead_code)]
@@ -105,6 +170,8 @@ pub struct Renderer {
     orbit_pitch: f32,
     orbit_distance: f32,
     orbit_target: glam::Vec3,
+    scene_camera: Option<CameraView>,
+    camera_view_on: bool,
 }
 
 const BYTES_PER_PIXEL: u32 = 4;
@@ -215,9 +282,44 @@ impl Renderer {
                 }],
             });
 
+        let lights_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("husk_lights_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // No lights yet: the shader uses the light that follows the camera.
+        let lights_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("husk_lights_buffer"),
+            contents: bytemuck::bytes_of(&lights_uniform(&[])),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let lights_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("husk_lights_bind_group"),
+            layout: &lights_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: lights_buffer.as_entire_binding(),
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("husk_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout, &bone_bind_group_layout],
+            bind_group_layouts: &[
+                &bind_group_layout,
+                &bone_bind_group_layout,
+                &lights_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -301,20 +403,21 @@ impl Renderer {
             active_object: 0,
             bind_group_layout,
             bone_bind_group_layout,
+            lights_buffer,
+            lights_bind_group,
             frame_time_total: Duration::ZERO,
             frame_time_count: 0,
             depth_texture,
             depth_view,
             last_view_proj: glam::Mat4::IDENTITY,
-            // Matches the original fixed camera exactly (eye (0, 1.5, 3),
-            // looking at the origin) just expressed as orbit parameters
-            // now instead of a hardcoded eye position.
             orbit_yaw: 0.0,
             orbit_pitch: 0.463_65,
             orbit_distance: 3.354_102,
             orbit_target,
+            scene_camera: None,
+            camera_view_on: false,
         }
-    }
+        }
 
     /// Builds the GPU resources for one drawable object: its own geometry,
     /// its own uniform (carrying its placement and colour) and its own
@@ -443,6 +546,48 @@ impl Renderer {
         }
         pixels
     }
+    /// The scene camera the viewport is looking through right now, if it is.
+    fn camera_through(&self) -> Option<CameraView> {
+        if self.camera_view_on {
+            self.scene_camera
+        } else {
+            None
+        }
+    }
+
+    /// Tells the renderer which camera the scene has (None if it has none),
+    /// where it is and what it sees. With no camera, camera view switches
+    /// itself off.
+    pub fn set_scene_camera(&mut self, camera: Option<CameraView>) {
+        self.scene_camera = camera;
+        if camera.is_none() {
+            self.camera_view_on = false;
+        }
+    }
+
+    /// Starts or stops looking through the scene camera. Returns whether
+    /// the viewport is looking through it now: false when asked to start
+    /// but the scene has no camera.
+    pub fn set_camera_view(&mut self, on: bool) -> bool {
+        self.camera_view_on = on && self.scene_camera.is_some();
+        self.camera_view_on
+    }
+
+    /// Whether the viewport is looking through the scene camera.
+    pub fn camera_view_active(&self) -> bool {
+        self.camera_view_on
+    }
+
+    /// While looking through the scene camera: where the output frame sits
+    /// in the viewport, as (x, y, width, height) in pixels. None otherwise.
+    pub fn camera_frame_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        let camera = self.camera_through()?;
+        Some(crate::scene::camera::frame_rect(
+            self.width as f32,
+            self.height as f32,
+            camera.frame_aspect,
+        ))
+    }
 
     /// Where the viewport camera is in the scene.
     fn eye(&self) -> glam::Vec3 {
@@ -470,6 +615,25 @@ impl Renderer {
         let model = placed * glam::Mat4::from_scale(glam::Vec3::splat(self.orbit_distance * 0.06));
         let index = self.add_object(mesh, model, CAMERA_COLOR);
         (index, model, CAMERA_COLOR)
+    }
+
+    /// Adds a light, drawn as `mesh` (a small proxy shape), above and to
+    /// the side of what the viewport is looking at, at a distance that
+    /// scales with the viewing distance, and facing the orbit target. The
+    /// shape is sized like the camera shape. Returns its index, its
+    /// placement matrix and its colour. The active object does not change.
+    pub fn add_light_at_view(
+        &mut self,
+        mesh: crate::geometry::mesh::MeshData,
+    ) -> (usize, glam::Mat4, [f32; 4]) {
+        const LIGHT_COLOR: [f32; 4] = [0.98, 0.84, 0.35, 1.0];
+        let position = self.orbit_target
+            + glam::Vec3::new(0.4, 0.8, 0.4).normalize() * self.orbit_distance * 1.2;
+        let placed =
+            glam::Mat4::look_at_rh(position, self.orbit_target, glam::Vec3::Y).inverse();
+        let model = placed * glam::Mat4::from_scale(glam::Vec3::splat(self.orbit_distance * 0.06));
+        let index = self.add_object(mesh, model, LIGHT_COLOR);
+        (index, model, LIGHT_COLOR)
     }
 
     /// Adds another object to the scene and returns its index. Section 5c
@@ -611,13 +775,33 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let aspect = self.width as f32 / self.height as f32;
-        let projection =
+        let mut projection =
             glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 0.1, 100.0);
 
-        let target = self.orbit_target;
-        let eye = self.eye();
-        let view_matrix = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
-        // Each object's own placement is applied in the shader (scene.model),
+        let mut target = self.orbit_target;
+        let mut eye = self.eye();
+        let mut view_matrix = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+
+        // Looking through the scene camera instead of the viewport's own.
+        if let Some(camera) = self.camera_through() {
+            eye = camera.world.transform_point3(glam::Vec3::ZERO);
+            target = eye + camera.world.transform_vector3(-glam::Vec3::Z);
+            view_matrix = camera.world.inverse();
+            // The output frame sits inside the viewport. Widen the view so
+            // that the frame sees exactly the camera's field of view.
+            let (_, _, _, frame_height) = crate::scene::camera::frame_rect(
+                self.width as f32,
+                self.height as f32,
+                camera.frame_aspect,
+            );
+            let fov = crate::scene::camera::viewport_fov_degrees(
+                camera.fov_degrees,
+                self.height as f32,
+                frame_height,
+            );
+            projection = glam::Mat4::perspective_rh(fov.to_radians(), aspect, 0.1, 100.0);
+        }
+            // Each object's own placement is applied in the shader (scene.model),
         // so this is just the camera.
         let view_proj = projection * view_matrix;
         self.last_view_proj = view_proj;
@@ -680,6 +864,7 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(2, &self.lights_bind_group, &[]);
             for object in &self.objects {
                 pass.set_bind_group(0, &object.bind_group, &[]);
                 pass.set_bind_group(1, &object.bone_bind_group, &[]);
@@ -813,8 +998,23 @@ impl Renderer {
         );
     }
 
+    /// Tells the renderer which lights the scene has (at most
+    /// `MAX_LIGHTS` are used). The scene is the source of truth, so this
+    /// is called after anything that changes them. With no lights the
+    /// shader uses the light that follows the camera.
+    pub fn set_lights(
+        &self,
+        lights: &[(crate::scene::transform::Transform, crate::scene::light::Light)],
+    ) {
+        self.queue.write_buffer(
+            &self.lights_buffer,
+            0,
+            bytemuck::bytes_of(&lights_uniform(lights)),
+        );
+    }
+
     pub fn project_to_screen(&self, world_point: glam::Vec3) -> Option<(f32, f32)> {
-        crate::render::picking::project_to_screen(
+    crate::render::picking::project_to_screen(
             self.last_view_proj,
             self.width as f32,
             self.height as f32,
@@ -1079,5 +1279,69 @@ impl Renderer {
         let local = ray.to_local(object.model);
         crate::render::picking::ray_mesh_intersection(&local, &mesh.positions, &mesh.indices)
             .map(|hit| ray.origin + ray.direction * hit.distance)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::light::{Light, LightKind};
+    use crate::scene::transform::Transform;
+
+    #[test]
+    fn the_lights_uniform_matches_the_layout_the_shader_expects() {
+        // 16 bytes of count, then eight lights of three vec4s each.
+        assert_eq!(std::mem::size_of::<GpuLight>(), 48);
+        assert_eq!(std::mem::size_of::<LightsUniform>(), 16 + 8 * 48);
+    }
+
+    #[test]
+    fn no_lights_packs_to_a_count_of_zero() {
+        let uniform = lights_uniform(&[]);
+        assert_eq!(uniform.count, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_sun_packs_its_direction_and_scaled_colour() {
+        let mut transform = Transform::default();
+        transform.rotation = glam::Quat::from_rotation_y(90f32.to_radians());
+        let sun = Light {
+            kind: LightKind::Sun,
+            color: [1.0, 0.5, 0.25],
+            intensity: 2.0,
+        };
+        let uniform = lights_uniform(&[(transform, sun)]);
+        assert_eq!(uniform.count[0], 1);
+        let packed = uniform.items[0];
+        assert_eq!(packed.position[3], 0.0);
+        // Rays travel along the object's -Z, which a quarter turn about Y
+        // sends to -X.
+        assert!((packed.direction[0] + 1.0).abs() < 1e-5);
+        assert!(packed.direction[1].abs() < 1e-5 && packed.direction[2].abs() < 1e-5);
+        assert_eq!(packed.color, [2.0, 1.0, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn a_point_light_packs_its_position_and_kind() {
+        let mut transform = Transform::default();
+        transform.translation = glam::Vec3::new(1.0, 2.0, 3.0);
+        let lamp = Light {
+            kind: LightKind::Point,
+            color: [1.0, 1.0, 1.0],
+            intensity: 40.0,
+        };
+        let uniform = lights_uniform(&[(transform, lamp)]);
+        assert_eq!(uniform.count[0], 1);
+        assert_eq!(uniform.items[0].position, [1.0, 2.0, 3.0, 1.0]);
+        assert_eq!(uniform.items[0].color, [40.0, 40.0, 40.0, 0.0]);
+    }
+
+    #[test]
+    fn lights_past_the_cap_are_left_out() {
+        let many: Vec<_> = (0..12)
+            .map(|_| (Transform::default(), Light::point()))
+            .collect();
+        let uniform = lights_uniform(&many);
+        assert_eq!(uniform.count[0] as usize, MAX_LIGHTS);
     }
 }

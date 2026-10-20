@@ -35,9 +35,14 @@ class StudioActions {
   void undoBone(BuildContext context) =>
       showMessage(context, studio.undoLastBone());
 
-  void addCamera(BuildContext context) =>
-      showMessage(context, studio.addCamera());
+  void toggleCameraView(BuildContext context) =>
+      showMessage(context, studio.toggleCameraView());
 
+  void addCamera(BuildContext context) =>
+        showMessage(context, studio.addCamera());
+
+  void addLight(BuildContext context, String kind) =>
+      showMessage(context, studio.addLight(kind));
   void deleteObject(BuildContext context) =>
       showMessage(context, studio.removeActiveObject());
 

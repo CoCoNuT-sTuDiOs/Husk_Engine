@@ -14,12 +14,6 @@ pub fn pick(x: f64, y: f64) -> Option<(f32, f32, f32)> {
         .map(|point| (point.x, point.y, point.z))
 }
 
-/// Casts a ray from a screen-space point and, if it hits the mesh, places
-/// a new bone there in the current skeleton. If `parent` is given, the
-/// new bone becomes that bone's child (its position is stored relative
-/// to the parent, per the skeleton's bind-pose convention); otherwise
-/// it's a new root bone. Returns the new bone's index and world-space
-/// position, or `None` if the click missed the mesh.
 #[flutter_rust_bridge::frb(sync)]
 pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, f32, f32)> {
     let hit = crate::platform::ffi::with_active_renderer(|renderer| {
@@ -627,6 +621,9 @@ pub fn remove_active_object() -> Option<usize> {
             "Husk: the scene removed object {index} but the renderer did not; the two lists are out of step"
         );
     }
+    // The object may have been the scene camera or a light.
+    push_scene_camera();
+    push_scene_lights();
     Some(index)
 }
 
@@ -720,9 +717,11 @@ pub fn set_active_object_transform(transform: ObjectTransform) -> bool {
     if applied != Some(true) {
         eprintln!("Husk: the scene moved object {index} but the renderer did not; the two lists are out of step");
     }
+    // The object may be the scene camera or a light.
+    push_scene_camera();
+    push_scene_lights();
     true
 }
-
 /// Where the cursor at screen pixel (x, y) falls along the axis line that
 /// passes through `origin` in direction `axis` (both in the scene), as a
 /// distance t along the axis from `origin`. A gizmo drag moves an object by
@@ -926,11 +925,12 @@ pub fn add_camera() -> Option<usize> {
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
     }
+    push_scene_camera();
     Some(render_index)
 }
 
 /// The active object's vertical field of view in degrees, if it is a
-/// camera; None for anything else.
+    /// camera; None for anything else.
 #[flutter_rust_bridge::frb(sync)]
 pub fn active_camera_fov() -> Option<f32> {
     crate::scene::active_camera().map(|lens| lens.fov_degrees)
@@ -944,12 +944,168 @@ pub fn set_active_camera_fov(degrees: f32) -> bool {
     if !degrees.is_finite() {
         return false;
     }
-    crate::scene::set_active_camera(
+    let applied = crate::scene::set_active_camera(
         crate::scene::camera::Camera {
             fov_degrees: degrees,
         }
         .clamped(),
-    )
+    );
+    if applied {
+        push_scene_camera();
+    }
+    applied
+}
+/// Adds a light of the given kind ("sun" or "point", any letter case),
+/// above and beside what the viewport is looking at and facing it.
+/// Returns its index, or None for an unknown kind. The active object does
+/// not change.
+#[flutter_rust_bridge::frb(sync)]
+pub fn add_light(kind: String) -> Option<usize> {
+    let (light, mesh, label) = match kind.to_lowercase().as_str() {
+        "sun" => (
+            crate::scene::light::Light::sun(),
+            crate::geometry::shapes::sun_proxy(),
+            "Sun",
+        ),
+        "point" => (
+            crate::scene::light::Light::point(),
+            crate::geometry::shapes::point_proxy(),
+            "Point light",
+        ),
+        _ => return None,
+    };
+    let (render_index, model, colour) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.add_light_at_view(mesh)
+    })?;
+    let scene_index = crate::scene::add_object(
+        label,
+        crate::scene::transform::Transform::from_matrix(model),
+        crate::scene::material::Material {
+            base_color: [colour[0], colour[1], colour[2]],
+            ..crate::scene::material::Material::default()
+        },
+        crate::scene::ObjectKind::Light(light),
+    );
+    if scene_index != render_index {
+        eprintln!(
+            "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
+        );
+    }
+    push_scene_lights();
+    Some(render_index)
+}
+
+/// A light as the Properties panel shows it: sun or point, colour (red,
+/// green, blue, each 0 to 1), intensity, and the top of the intensity
+/// range for this kind of light.
+pub struct ObjectLight {
+    pub is_sun: bool,
+    pub color: (f32, f32, f32),
+    pub intensity: f32,
+    pub max_intensity: f32,
+}
+
+/// The active object's light, if it is a light; None for anything else.
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_light() -> Option<ObjectLight> {
+    crate::scene::active_light().map(|light| ObjectLight {
+        is_sun: light.kind == crate::scene::light::LightKind::Sun,
+        color: (light.color[0], light.color[1], light.color[2]),
+        intensity: light.intensity,
+        max_intensity: light.max_intensity(),
+    })
+}
+
+/// Sets the active light's colour and intensity (held inside their
+/// ranges). The kind (sun or point) stays as it is. False, changing
+/// nothing, if the active object is not a light or a value is not a
+/// finite number.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_active_light(color: (f32, f32, f32), intensity: f32) -> bool {
+    let values = [color.0, color.1, color.2, intensity];
+    if !values.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    let Some(current) = crate::scene::active_light() else {
+        return false;
+    };
+    let applied = crate::scene::set_active_light(
+        crate::scene::light::Light {
+            kind: current.kind,
+            color: [color.0, color.1, color.2],
+            intensity,
+        }
+        .clamped(),
+    );
+    if applied {
+        push_scene_lights();
+    }
+    applied
+}
+
+/// Tells the renderer which lights the scene has and where they are. The
+/// scene is the source of truth, so this is called after anything that
+/// changes them.
+fn push_scene_lights() {
+    let lights = crate::scene::scene_lights();
+    crate::platform::ffi::with_active_renderer(|renderer| renderer.set_lights(&lights));
+}
+
+/// Tells the renderer which scene camera to look through, where it is, its
+/// lens and the output frame's shape. The scene is the source of truth, so
+/// this is called after anything that changes them.
+fn push_scene_camera() {
+    let aspect = crate::scene::output().aspect();
+    let camera = crate::scene::scene_camera().map(|(transform, lens)| {
+        crate::render::renderer::CameraView {
+            world: transform.placement_matrix(),
+            fov_degrees: lens.fov_degrees,
+            frame_aspect: aspect,
+        }
+    });
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_scene_camera(camera));
+}
+
+/// Starts or stops looking through the scene camera (the first camera in
+/// the scene). Returns whether the viewport is looking through it now:
+/// false when asked to start but the scene has no camera.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_camera_view(on: bool) -> bool {
+    push_scene_camera();
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_camera_view(on))
+        .unwrap_or(false)
+}
+
+/// Whether the viewport is looking through the scene camera.
+#[flutter_rust_bridge::frb(sync)]
+pub fn camera_view_active() -> bool {
+    crate::platform::ffi::with_active_renderer(|renderer| renderer.camera_view_active())
+        .unwrap_or(false)
+}
+
+/// While looking through the scene camera: where the output frame sits in
+/// the viewport, as (x, y, width, height) in render pixels. None otherwise.
+#[flutter_rust_bridge::frb(sync)]
+pub fn camera_frame_rect() -> Option<(f32, f32, f32, f32)> {
+    crate::platform::ffi::with_active_renderer(|renderer| renderer.camera_frame_rect()).flatten()
+}
+
+/// The finished video's width, height (pixels) and frame rate.
+#[flutter_rust_bridge::frb(sync)]
+pub fn output_settings() -> (u32, u32, u32) {
+    let output = crate::scene::output();
+    (output.width, output.height, output.fps)
+}
+
+/// Sets the finished video's width, height and frame rate. Sizes are held
+/// between 16 and 7680 and made even, and the rate between 1 and 120.
+/// Returns the values that were kept.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_output_settings(width: u32, height: u32, fps: u32) -> (u32, u32, u32) {
+    let kept = crate::scene::output::Output { width, height, fps }.clamped();
+    crate::scene::set_output(kept);
+    push_scene_camera();
+    (kept.width, kept.height, kept.fps)
 }
 
 #[flutter_rust_bridge::frb(init)]

@@ -91,6 +91,15 @@ class ViewportController {
     rust.moveCharacter(x: x, y: y);
   }
 
+  /// While looking through the scene camera: where the output frame sits in
+  /// the render, in render pixels. Null otherwise.
+  Rect? cameraFrame() {
+    final frame = rust.cameraFrameRect();
+    if (frame == null) return null;
+    final (x, y, width, height) = frame;
+    return Rect.fromLTWH(x, y, width, height);
+  }
+
   /// The three gizmo directions: X, Y and Z in the scene.
   static const List<(double, double, double)> gizmoAxisDirections = [
     (1.0, 0.0, 0.0),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:husk_app/src/rust/api/simple.dart'
     show ObjectMaterial, ObjectTransform;
@@ -28,7 +30,12 @@ class PropertiesPanel extends StatelessWidget {
               title: 'Transform',
               child: _TransformSection(studio: studio),
             ),
-            if (studio.activeCameraFov == null)
+              if (studio.activeLight != null)
+              CollapsibleSection(
+                title: 'Light',
+                child: _LightSection(studio: studio),
+              )
+            else if (studio.activeCameraFov == null)
               CollapsibleSection(
                 title: 'Material',
                 child: _MaterialSection(studio: studio),
@@ -51,6 +58,10 @@ class PropertiesPanel extends StatelessWidget {
               child: _PosingSection(actions: actions),
             ),
             CollapsibleSection(
+              title: 'Output',
+              child: _OutputSection(studio: studio),
+            ),
+            CollapsibleSection(
               title: 'Danger zone',
               initiallyExpanded: false,
               titleColor: HuskColors.error,
@@ -59,6 +70,77 @@ class PropertiesPanel extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// A typed number as a whole number the engine can take (never negative).
+int _whole(double value) => value.round().clamp(0, 100000);
+
+/// What the finished video looks like: its shape, size and frame rate. The
+/// scene camera frames its shot for this shape.
+class _OutputSection extends StatelessWidget {
+  const _OutputSection({required this.studio});
+
+  final StudioController studio;
+
+  @override
+  Widget build(BuildContext context) {
+    final (width, height, fps) = studio.outputSettings;
+
+    Widget preset(String label, int w, int h) => Expanded(
+          child: ElevatedButton(
+            onPressed: () => studio.setOutputSettings(w, h, fps),
+            child: Text(label),
+          ),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            preset('16:9', 1920, 1080),
+            const SizedBox(width: 6),
+            preset('9:16', 1080, 1920),
+            const SizedBox(width: 6),
+            preset('1:1', 1080, 1080),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: NumberField(
+                label: 'W',
+                value: width.toDouble(),
+                onChanged: (v) => studio.setOutputSettings(_whole(v), height, fps),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'H',
+                value: height.toDouble(),
+                onChanged: (v) => studio.setOutputSettings(width, _whole(v), fps),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'fps',
+                value: fps.toDouble(),
+                onChanged: (v) => studio.setOutputSettings(width, height, _whole(v)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Video: $width x $height at $fps frames per second',
+          style: HuskText.readout,
+        ),
+      ],
     );
   }
 }
@@ -196,6 +278,111 @@ class _MaterialSection extends StatelessWidget {
           label: 'Metalness',
           value: material.metalness,
           onChanged: (v) => change(metalness: v),
+        ),
+      ],
+    );
+  }
+}
+
+/// A light: its kind, colour and intensity. A sun's intensity is its
+/// brightness; a point light's is its brightness one unit away, fading with
+/// the square of the distance. The slider runs on a square-root scale, so
+/// the small values (where most lights live) are easy to hit.
+class _LightSection extends StatelessWidget {
+  const _LightSection({required this.studio});
+
+  final StudioController studio;
+
+  @override
+  Widget build(BuildContext context) {
+    final light = studio.activeLight;
+    if (light == null) return const SizedBox.shrink();
+    final (r, g, b) = light.color;
+
+    void change({(double, double, double)? color, double? intensity}) {
+      studio.setActiveLight(
+        color ?? light.color,
+        intensity ?? light.intensity,
+      );
+    }
+
+    final position = light.maxIntensity <= 0
+        ? 0.0
+        : math
+            .sqrt((light.intensity / light.maxIntensity).clamp(0.0, 1.0))
+            .toDouble();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ReadoutRow(label: 'Kind', value: light.isSun ? 'Sun' : 'Point light'),
+        const SizedBox(height: 8),
+        const Text('Colour', style: HuskText.readout),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final swatch in _swatches)
+              _Swatch(
+                color: swatch,
+                onTap: () => change(color: (swatch.r, swatch.g, swatch.b)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: NumberField(
+                label: 'R',
+                labelColor: HuskColors.error,
+                value: (r * 255).roundToDouble(),
+                onChanged: (v) => change(color: (v.clamp(0.0, 255.0) / 255, g, b)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'G',
+                labelColor: HuskColors.success,
+                value: (g * 255).roundToDouble(),
+                onChanged: (v) => change(color: (r, v.clamp(0.0, 255.0) / 255, b)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'B',
+                labelColor: HuskColors.blue,
+                value: (b * 255).roundToDouble(),
+                onChanged: (v) => change(color: (r, g, v.clamp(0.0, 255.0) / 255)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            const SizedBox(
+              width: 74,
+              child: Text('Intensity', style: HuskText.readout),
+            ),
+            Expanded(
+              child: Slider(
+                value: position,
+                onChanged: (v) => change(intensity: light.maxIntensity * v * v),
+              ),
+            ),
+            SizedBox(
+              width: 48,
+              child: Text(
+                light.intensity.toStringAsFixed(1),
+                textAlign: TextAlign.right,
+                style: HuskText.readout,
+              ),
+            ),
+          ],
         ),
       ],
     );

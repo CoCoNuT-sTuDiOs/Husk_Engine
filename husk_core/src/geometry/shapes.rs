@@ -227,6 +227,64 @@ pub fn camera_proxy() -> MeshData {
     mesh
 }
 
+/// What a point light looks like in the viewport: a small sphere, about
+/// one unit across.
+pub fn point_proxy() -> MeshData {
+    sphere(0.5, 16, 8)
+}
+
+/// What a sun looks like in the viewport: an arrow along its own negative
+/// Z axis, the way it shines. A thin shaft from z = 0 to z = -1 and a
+/// pyramid head whose tip is at z = -1.5.
+pub fn sun_proxy() -> MeshData {
+    use glam::Vec3;
+    let mut mesh = MeshData::default();
+
+    // The shaft: a thin box.
+    let half = 0.07;
+    let (back, front) = (0.0, -1.0);
+    let shaft_centre = Vec3::new(0.0, 0.0, (back + front) * 0.5);
+    let corner = |x: f32, y: f32, z: f32| Vec3::new(x * half, y * half, z);
+    let (a, b, c, d) = (
+        corner(-1.0, -1.0, front),
+        corner(1.0, -1.0, front),
+        corner(1.0, 1.0, front),
+        corner(-1.0, 1.0, front),
+    );
+    let (e, f, g, h) = (
+        corner(-1.0, -1.0, back),
+        corner(1.0, -1.0, back),
+        corner(1.0, 1.0, back),
+        corner(-1.0, 1.0, back),
+    );
+    for quad in [
+        [a, b, c, d],
+        [e, f, g, h],
+        [a, b, f, e],
+        [d, c, g, h],
+        [a, d, h, e],
+        [b, c, g, f],
+    ] {
+        push_flat_quad(&mut mesh, quad[0], quad[1], quad[2], quad[3], shaft_centre);
+    }
+
+    // The head: a pyramid opening backwards from the tip.
+    let tip = Vec3::new(0.0, 0.0, -1.5);
+    let head_half = 0.25;
+    let base = [
+        Vec3::new(-head_half, -head_half, front),
+        Vec3::new(head_half, -head_half, front),
+        Vec3::new(head_half, head_half, front),
+        Vec3::new(-head_half, head_half, front),
+    ];
+    let head_centre = Vec3::new(0.0, 0.0, -1.15);
+    for i in 0..4 {
+        push_flat_triangle(&mut mesh, tip, base[i], base[(i + 1) % 4], head_centre);
+    }
+    push_flat_quad(&mut mesh, base[0], base[1], base[2], base[3], head_centre);
+    mesh
+}
+
 /// The built-in shapes, in the order the tray shows them. `by_name`
 /// understands exactly these (any letter case). The tray asks the engine
 /// for this list, so a new shape only has to be added here and in
@@ -320,6 +378,34 @@ mod tests {
             .map(|p| p[0].abs())
             .fold(0.0_f32, f32::max);
         assert!((widest_open_end - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_light_proxies_are_well_formed_and_the_sun_points_down_negative_z() {
+        let point = point_proxy();
+        assert_well_formed(&point);
+        assert_outward_winding(&point);
+        for axis in 0..3 {
+            assert!((extent(&point, axis) - 1.0).abs() < 1e-4);
+        }
+
+        let sun = sun_proxy();
+        assert_well_formed(&sun);
+        assert_outward_winding(&sun);
+        // 6 shaft faces and the head base are two triangles each; 4 head sides.
+        assert_eq!(sun.triangle_count(), 6 * 2 + 4 + 2);
+        let min_z = sun.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+        let max_z = sun.positions.iter().map(|p| p[2]).fold(f32::MIN, f32::max);
+        assert!((min_z + 1.5).abs() < 1e-5, "tip at {min_z}");
+        assert!(max_z.abs() < 1e-5, "back at {max_z}");
+        // The head is wider than the shaft.
+        let widest_head = sun
+            .positions
+            .iter()
+            .filter(|p| (p[2] + 1.0).abs() < 1e-5)
+            .map(|p| p[0].abs())
+            .fold(0.0_f32, f32::max);
+        assert!((widest_head - 0.25).abs() < 1e-5);
     }
 
     #[test]
