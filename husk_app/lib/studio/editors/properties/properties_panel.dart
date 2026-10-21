@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:husk_app/src/rust/api/simple.dart'
-    show ObjectMaterial, ObjectTransform;
+show ObjectMaterial, ObjectTransform, WorldSettings;
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
@@ -59,7 +59,11 @@ class PropertiesPanel extends StatelessWidget {
             ),
             CollapsibleSection(
               title: 'Output',
-              child: _OutputSection(studio: studio),
+            child: _OutputSection(studio: studio),
+            ),
+            CollapsibleSection(
+              title: 'World',
+                child: _WorldSection(studio: studio),
             ),
             CollapsibleSection(
               title: 'Danger zone',
@@ -140,6 +144,128 @@ class _OutputSection extends StatelessWidget {
           'Video: $width x $height at $fps frames per second',
           style: HuskText.readout,
         ),
+      ],
+    );
+  }
+}
+
+/// The colours offered for the background: Husk's own dark, blacks and
+/// greys, white, a sky blue and a warm sand.
+const List<Color> _backgroundSwatches = [
+  Color(0xFF0D0D14),
+  Color(0xFF000000),
+  Color(0xFF2D2D2D),
+  Color(0xFF808080),
+  Color(0xFFE8E8E8),
+  Color(0xFFFFFFFF),
+  Color(0xFF87B5E8),
+  Color(0xFFF1C27D),
+];
+
+/// The space around the objects: the background colour, how strong the
+/// soft studio light on surfaces is, and how strong the studio reflections
+/// are. It belongs to the whole scene, not to the active object.
+class _WorldSection extends StatelessWidget {
+  const _WorldSection({required this.studio});
+
+  final StudioController studio;
+
+  @override
+  Widget build(BuildContext context) {
+    final world = studio.world;
+    final (r, g, b) = world.background;
+
+    void change({
+      (double, double, double)? background,
+      double? ambient,
+      double? reflections,
+    }) {
+      studio.setWorld(
+        WorldSettings(
+          background: background ?? world.background,
+          ambient: ambient ?? world.ambient,
+          reflections: reflections ?? world.reflections,
+        ),
+      );
+    }
+
+    Widget strength(String label, double value, ValueChanged<double> onChanged) {
+      return Row(
+        children: [
+          SizedBox(width: 74, child: Text(label, style: HuskText.readout)),
+          Expanded(
+            child: Slider(
+              value: value.clamp(0.0, 2.0),
+              min: 0,
+              max: 2,
+              onChanged: onChanged,
+            ),
+          ),
+          SizedBox(
+            width: 36,
+            child: Text(
+              value.toStringAsFixed(2),
+              textAlign: TextAlign.right,
+              style: HuskText.readout,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Background', style: HuskText.readout),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final swatch in _backgroundSwatches)
+              _Swatch(
+                color: swatch,
+                onTap: () => change(background: (swatch.r, swatch.g, swatch.b)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: NumberField(
+                label: 'R',
+                labelColor: HuskColors.error,
+                value: (r * 255).roundToDouble(),
+                onChanged: (v) =>
+                    change(background: (v.clamp(0.0, 255.0) / 255, g, b)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'G',
+                labelColor: HuskColors.success,
+                value: (g * 255).roundToDouble(),
+                onChanged: (v) =>
+                    change(background: (r, v.clamp(0.0, 255.0) / 255, b)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: NumberField(
+                label: 'B',
+                labelColor: HuskColors.blue,
+                value: (b * 255).roundToDouble(),
+                onChanged: (v) =>
+                    change(background: (r, g, v.clamp(0.0, 255.0) / 255)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        strength('Ambient', world.ambient, (v) => change(ambient: v)),
+        strength('Reflections', world.reflections, (v) => change(reflections: v)),
       ],
     );
   }

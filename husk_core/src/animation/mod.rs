@@ -92,5 +92,6 @@ impl AnimationClip {
         posed
     }
 }
+pub mod channels;
 pub mod keyframes;
 pub mod pose;

@@ -195,7 +195,19 @@ BigInt? get selectedBone => _selectedBone;
     return applied;
   }
 
-  /// The active object's material. The Rust core owns it; this only reads
+  /// The scene's world: background colour and studio light. The Rust core
+  /// owns it; this only reads it.
+  rust.WorldSettings get world => rust.worldSettings();
+
+  /// Applies [settings] to the world. Returns false if the engine refused
+  /// it (a value that is not a finite number).
+  bool setWorld(rust.WorldSettings settings) {
+    final applied = rust.setWorldSettings(settings: settings);
+    if (applied) notifyListeners();
+    return applied;
+  }
+
+  /// The active object's material. The Rust core owns it; this only
   /// it.
   rust.ObjectMaterial get activeMaterial => rust.activeObjectMaterial();
 

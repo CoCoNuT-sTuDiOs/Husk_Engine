@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 990035288;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 223279695;
 
 // Section: executor
 
@@ -1727,6 +1727,36 @@ fn wire__crate__api__simple__set_vertex_weight_impl(
         },
     )
 }
+fn wire__crate__api__simple__set_world_settings_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_world_settings",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_settings = <crate::api::simple::WorldSettings>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>(crate::api::simple::set_world_settings(api_settings))?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__simple__shape_names_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1844,6 +1874,35 @@ fn wire__crate__api__simple__undo_last_bone_impl(
             deserializer.end();
             transform_result_sse::<_, ()>((move || {
                 let output_ok = Ok::<_, ()>(crate::api::simple::undo_last_bone())?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__simple__world_settings_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "world_settings",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>(crate::api::simple::world_settings())?;
                 std::result::Result::Ok(output_ok)
             })())
         },
@@ -2282,6 +2341,20 @@ impl SseDecode for usize {
     }
 }
 
+impl SseDecode for crate::api::simple::WorldSettings {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_background = <(f32, f32, f32)>::sse_decode(deserializer);
+        let mut var_ambient = <f32>::sse_decode(deserializer);
+        let mut var_reflections = <f32>::sse_decode(deserializer);
+        return crate::api::simple::WorldSettings {
+            background: var_background,
+            ambient: var_ambient,
+            reflections: var_reflections,
+        };
+    }
+}
+
 impl SseDecode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2299,7 +2372,7 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         25 => wire__crate__api__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__simple__shape_preview_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__simple__shape_preview_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2369,10 +2442,12 @@ fn pde_ffi_dispatcher_sync_impl(
         52 => wire__crate__api__simple__set_repeat_end_impl(ptr, rust_vec_len, data_len),
         53 => wire__crate__api__simple__set_travel_speed_impl(ptr, rust_vec_len, data_len),
         54 => wire__crate__api__simple__set_vertex_weight_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__simple__shape_names_impl(ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__simple__travel_speed_impl(ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__simple__undo_last_bone_impl(ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__simple__zoom_camera_impl(ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__simple__set_world_settings_impl(ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__simple__shape_names_impl(ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__simple__travel_speed_impl(ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__simple__undo_last_bone_impl(ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__simple__world_settings_impl(ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__simple__zoom_camera_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2443,6 +2518,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::simple::ObjectTransform>
     for crate::api::simple::ObjectTransform
 {
     fn into_into_dart(self) -> crate::api::simple::ObjectTransform {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::simple::WorldSettings {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.background.into_into_dart().into_dart(),
+            self.ambient.into_into_dart().into_dart(),
+            self.reflections.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::simple::WorldSettings
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::simple::WorldSettings>
+    for crate::api::simple::WorldSettings
+{
+    fn into_into_dart(self) -> crate::api::simple::WorldSettings {
         self
     }
 }
@@ -2794,6 +2891,15 @@ impl SseEncode for usize {
             .cursor
             .write_u64::<NativeEndian>(self as _)
             .unwrap();
+    }
+}
+
+impl SseEncode for crate::api::simple::WorldSettings {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <(f32, f32, f32)>::sse_encode(self.background, serializer);
+        <f32>::sse_encode(self.ambient, serializer);
+        <f32>::sse_encode(self.reflections, serializer);
     }
 }
 

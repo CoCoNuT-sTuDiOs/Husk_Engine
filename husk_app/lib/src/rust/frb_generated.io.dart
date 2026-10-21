@@ -63,6 +63,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt dco_decode_box_autoadd_usize(dynamic raw);
 
   @protected
+  WorldSettings dco_decode_box_autoadd_world_settings(dynamic raw);
+
+  @protected
   double dco_decode_f_32(dynamic raw);
 
   @protected
@@ -191,6 +194,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt dco_decode_usize(dynamic raw);
 
   @protected
+  WorldSettings dco_decode_world_settings(dynamic raw);
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
@@ -247,6 +253,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_box_autoadd_usize(SseDeserializer deserializer);
+
+  @protected
+  WorldSettings sse_decode_box_autoadd_world_settings(
+    SseDeserializer deserializer,
+  );
 
   @protected
   double sse_decode_f_32(SseDeserializer deserializer);
@@ -403,6 +414,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt sse_decode_usize(SseDeserializer deserializer);
 
   @protected
+  WorldSettings sse_decode_world_settings(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -470,6 +484,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_usize(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_world_settings(
+    WorldSettings self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
@@ -668,6 +688,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_usize(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_world_settings(WorldSettings self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);

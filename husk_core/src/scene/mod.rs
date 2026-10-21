@@ -2,7 +2,9 @@ pub mod transform;
 pub mod camera;
 pub mod material;
 pub mod output;
+pub mod world;
 pub mod light;
+use crate::animation::channels::{Channels, Interpolation, Property, Value};
 use crate::rig::Skeleton;
 use crate::rig::skinning::VertexWeights;
 use std::ops::{Deref, DerefMut};
@@ -33,6 +35,164 @@ pub struct Object {
     pub weights: Option<Vec<VertexWeights>>,
     pub pose: crate::animation::pose::Pose,
     pub timeline: crate::animation::keyframes::Timeline,
+    /// The object's animation of everything except its bones: placement,
+    /// look, lens and light.
+    pub channels: Channels,
+}
+
+impl Object {
+    /// Every moment (seconds) that has a key on this object, bones or
+    /// anything else, earliest first, with keys at nearly the same moment
+    /// counted once.
+    pub fn key_times(&self) -> Vec<f32> {
+        let mut all: Vec<f32> = self.timeline.keys.iter().map(|key| key.time).collect();
+        all.extend(self.channels.key_times());
+        all.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        all.dedup_by(|a, b| (*a - *b).abs() < 0.005);
+        all
+    }
+
+    /// Deletes the keys closest to `time` (within `tolerance` seconds) in
+    /// the pose and in every channel. Returns whether any key was removed.
+    pub fn remove_keys_near(&mut self, time: f32, tolerance: f32) -> bool {
+        let pose_removed = self.timeline.remove_near(time, tolerance);
+        let channels_removed = self.channels.remove_near(time, tolerance);
+        pose_removed || channels_removed
+    }
+
+    /// Records what this object looks like and where it is as keys at
+    /// `time` (seconds): position and rotation for everything, then scale,
+    /// colour, roughness and metalness for a mesh, the field of view for a
+    /// camera, or colour and intensity for a light. (A camera's or light's
+    /// scale is only the size of its viewport shape, so it is not keyed.)
+    pub fn key_channels(&mut self, time: f32) {
+        let transform = self.transform;
+        let material = self.material;
+        let linear = Interpolation::Linear;
+        let channels = &mut self.channels;
+        channels.set_key(
+            Property::Position,
+            time,
+            Value::Vector(transform.translation),
+            linear,
+        );
+        channels.set_key(
+            Property::Rotation,
+            time,
+            Value::Rotation(transform.rotation),
+            linear,
+        );
+        match self.kind {
+            ObjectKind::Mesh => {
+                channels.set_key(Property::Scale, time, Value::Vector(transform.scale), linear);
+                channels.set_key(
+                    Property::Colour,
+                    time,
+                    Value::Vector(glam::Vec3::from(material.base_color)),
+                    linear,
+                );
+                channels.set_key(Property::Roughness, time, Value::Scalar(material.roughness), linear);
+                channels.set_key(Property::Metalness, time, Value::Scalar(material.metalness), linear);
+            }
+            ObjectKind::Camera(lens) => {
+                channels.set_key(Property::CameraFov, time, Value::Scalar(lens.fov_degrees), linear);
+            }
+            ObjectKind::Light(light) => {
+                channels.set_key(
+                    Property::LightColour,
+                    time,
+                    Value::Vector(glam::Vec3::from(light.color)),
+                    linear,
+                );
+                channels.set_key(
+                    Property::LightIntensity,
+                    time,
+                    Value::Scalar(light.intensity),
+                    linear,
+                );
+            }
+        }
+    }
+
+    /// Sets what this object looks like and where it is to what its
+    /// channels say at `time` (seconds). Properties without a channel are
+    /// left as they are, and values are held inside their ranges. Returns
+    /// whether any channel supplied a value.
+    pub fn apply_channels(&mut self, time: f32) -> bool {
+        // The object's repeat (set on its pose timeline) loops its
+        // channels too. Keys are always made together, so the pose keys and
+        // the channel keys start and end at the same moments.
+        self.channels.loop_period = self.timeline.effective_period();
+        let mut applied = false;
+        let mut transform = self.transform;
+        if let Some(Value::Vector(position)) = self.channels.sample(Property::Position, time) {
+            transform.translation = position;
+            applied = true;
+        }
+        if let Some(Value::Rotation(rotation)) = self.channels.sample(Property::Rotation, time) {
+            transform.rotation = rotation;
+            applied = true;
+        }
+        if let Some(Value::Vector(scale)) = self.channels.sample(Property::Scale, time) {
+            transform.scale = transform::clamp_scale(scale);
+            applied = true;
+        }
+        self.transform = transform;
+
+        let mut material = self.material;
+        if let Some(Value::Vector(colour)) = self.channels.sample(Property::Colour, time) {
+            material.base_color = colour.to_array();
+            applied = true;
+        }
+        if let Some(Value::Scalar(roughness)) = self.channels.sample(Property::Roughness, time) {
+            material.roughness = roughness;
+            applied = true;
+        }
+        if let Some(Value::Scalar(metalness)) = self.channels.sample(Property::Metalness, time) {
+            material.metalness = metalness;
+            applied = true;
+        }
+        self.material = material.clamped();
+
+        match &mut self.kind {
+            ObjectKind::Camera(lens) => {
+                if let Some(Value::Scalar(fov)) = self.channels.sample(Property::CameraFov, time) {
+                    *lens = camera::Camera { fov_degrees: fov }.clamped();
+                    applied = true;
+                }
+            }
+            ObjectKind::Light(light) => {
+                let mut next = *light;
+                if let Some(Value::Vector(colour)) =
+                    self.channels.sample(Property::LightColour, time)
+                {
+                    next.color = colour.to_array();
+                    applied = true;
+                }
+                if let Some(Value::Scalar(intensity)) =
+                    self.channels.sample(Property::LightIntensity, time)
+                {
+                    next.intensity = intensity;
+                    applied = true;
+                }
+                *light = next.clamped();
+            }
+            ObjectKind::Mesh => {}
+        }
+        applied
+    }
+}
+
+/// One object as the renderer should draw it after the animation was
+/// evaluated at some moment.
+pub struct ObjectFrame {
+    pub index: usize,
+    pub model: glam::Mat4,
+    pub material: material::Material,
+    /// The skinning matrices, if the object has pose keys.
+    pub skinning: Option<Vec<glam::Mat4>>,
+    /// Whether the channels set the object's placement or look.
+    pub placed: bool,
 }
 
 /// One shot: a list of objects, and which one the tools act on.
@@ -42,6 +202,8 @@ pub struct Scene {
     pub active_object: usize,
     /// What the finished video looks like.
     pub output: output::Output,
+    /// The space around the objects: background and studio light.
+    pub world: world::World,
 }
 
 impl Scene {
@@ -122,6 +284,42 @@ impl Scene {
                 _ => None,
             })
             .take(light::MAX_LIGHTS)
+            .collect()
+    }
+
+    /// Sets every object of the scene to how its animation says it is at
+    /// `time` (seconds): the pose from the pose keys, and placement, look,
+    /// lens and light from the channels. Objects without keys are left as
+    /// they are. Returns what the renderer needs for each object, in list
+    /// order.
+    pub fn evaluate_at(&mut self, time: f32) -> Vec<ObjectFrame> {
+        self.objects
+            .iter_mut()
+            .enumerate()
+            .map(|(index, object)| {
+                let skinning = match object
+                    .timeline
+                    .sample(time, object.skeleton.bones.len())
+                {
+                    Some(rotations) => {
+                        object.pose.rotations = rotations;
+                        object.pose.root_offset = object
+                            .timeline
+                            .sample_offset(time)
+                            .unwrap_or(glam::Vec3::ZERO);
+                        Some(object.pose.skinning_matrices(&object.skeleton))
+                    }
+                    None => None,
+                };
+                let placed = object.apply_channels(time);
+                ObjectFrame {
+                    index,
+                    model: object.transform.to_matrix(),
+                    material: object.material,
+                    skinning,
+                    placed,
+                }
+            })
             .collect()
     }
 
@@ -379,6 +577,17 @@ pub fn scene_lights() -> Vec<(transform::Transform, light::Light)> {
         .map_or_else(Vec::new, |scene| scene.lights())
 }
 
+/// Evaluates the active scene's animation at `time` (see
+/// `Scene::evaluate_at`).
+pub fn evaluate_at(time: f32) -> Vec<ObjectFrame> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => scene.evaluate_at(time),
+        None => Vec::new(),
+    }
+}
+
 /// What the finished video looks like: its size and frame rate.
 pub fn output() -> output::Output {
 let guard = PROJECT.lock().unwrap();
@@ -395,6 +604,25 @@ pub fn set_output(settings: output::Output) {
     let scene_index = guard.active_scene;
     if let Some(scene) = guard.scenes.get_mut(scene_index) {
         scene.output = settings;
+    }
+}
+
+/// The active scene's world: its background and studio light.
+pub fn world() -> world::World {
+    let guard = PROJECT.lock().unwrap();
+    guard
+        .scenes
+        .get(guard.active_scene)
+        .map_or_else(world::World::default, |scene| scene.world)
+}
+
+/// Sets the active scene's world. The settings are kept as given; hold
+/// them inside their ranges first (`World::clamped`).
+pub fn set_world(settings: world::World) {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.world = settings;
     }
 }
 
@@ -523,6 +751,185 @@ let mut scene = Scene::default();
             object.kind = ObjectKind::Light(light::Light::point());
         }
         assert_eq!(scene.lights().len(), light::MAX_LIGHTS);
+    }
+
+    #[test]
+    fn keying_a_mesh_and_applying_brings_back_its_placement_and_look() {
+        let mut scene = scene_with(1, 0);
+        let object = &mut scene.objects[0];
+        object.transform.translation = glam::Vec3::new(1.0, 2.0, 3.0);
+        object.transform.scale = glam::Vec3::new(2.0, 2.0, 2.0);
+        object.material.roughness = 0.9;
+        object.material.base_color = [0.1, 0.2, 0.3];
+        let keyed = (object.transform, object.material);
+        object.key_channels(1.0);
+
+        // Change everything, then ask for the keyed moment.
+        object.transform = transform::Transform::default();
+        object.material = material::Material::default();
+        assert!(object.apply_channels(1.0));
+        assert_eq!(object.transform, keyed.0);
+        assert_eq!(object.material, keyed.1);
+    }
+
+    #[test]
+    fn the_channels_blend_between_two_keyed_moments() {
+        let mut scene = scene_with(1, 0);
+        let object = &mut scene.objects[0];
+        object.material.roughness = 0.2;
+        object.key_channels(0.0);
+        object.transform.translation = glam::Vec3::new(4.0, 0.0, 0.0);
+        object.transform.rotation = glam::Quat::from_rotation_z(90f32.to_radians());
+        object.material.roughness = 0.6;
+        object.key_channels(2.0);
+
+        assert!(object.apply_channels(1.0));
+        assert!((object.transform.translation - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-5);
+        assert!((object.material.roughness - 0.4).abs() < 1e-5);
+        let halfway = glam::Quat::from_rotation_z(45f32.to_radians());
+        assert!(object.transform.rotation.dot(halfway).abs() > 0.99999);
+    }
+
+    #[test]
+    fn cameras_and_lights_key_only_what_they_animate() {
+        let mut scene = scene_with(2, 0);
+        scene.objects[0].kind = ObjectKind::Camera(camera::Camera { fov_degrees: 50.0 });
+        scene.objects[1].kind = ObjectKind::Light(light::Light::sun());
+        for object in scene.objects.iter_mut() {
+            object.key_channels(0.0);
+        }
+
+        let camera_object = &scene.objects[0];
+        assert!(camera_object.channels.sample(Property::Position, 0.0).is_some());
+        assert!(camera_object.channels.sample(Property::CameraFov, 0.0).is_some());
+        assert!(camera_object.channels.sample(Property::Scale, 0.0).is_none());
+        assert!(camera_object.channels.sample(Property::Colour, 0.0).is_none());
+
+        let light_object = &scene.objects[1];
+        assert!(light_object.channels.sample(Property::LightColour, 0.0).is_some());
+        assert!(light_object.channels.sample(Property::LightIntensity, 0.0).is_some());
+        assert!(light_object.channels.sample(Property::CameraFov, 0.0).is_none());
+        assert!(light_object.channels.sample(Property::Scale, 0.0).is_none());
+
+        // Change both, then apply: the lens and the light come back, and a
+        // sun stays a sun.
+        scene.objects[0].kind = ObjectKind::Camera(camera::Camera { fov_degrees: 90.0 });
+        let mut changed = light::Light::sun();
+        changed.intensity = 9.0;
+        scene.objects[1].kind = ObjectKind::Light(changed);
+        assert!(scene.objects[0].apply_channels(0.0));
+        assert!(scene.objects[1].apply_channels(0.0));
+        assert_eq!(
+            scene.objects[0].kind,
+            ObjectKind::Camera(camera::Camera { fov_degrees: 50.0 })
+        );
+        assert_eq!(scene.objects[1].kind, ObjectKind::Light(light::Light::sun()));
+    }
+
+    #[test]
+    fn an_object_without_channels_is_left_alone() {
+        let mut scene = scene_with(1, 0);
+        let object = &mut scene.objects[0];
+        object.transform.translation = glam::Vec3::new(5.0, 0.0, 0.0);
+        let before = object.transform;
+        assert!(!object.apply_channels(1.0));
+        assert_eq!(object.transform, before);
+    }
+
+    #[test]
+    fn applied_values_are_held_inside_their_ranges() {
+        let mut scene = scene_with(1, 0);
+        let object = &mut scene.objects[0];
+        object.kind = ObjectKind::Camera(camera::Camera::default());
+        assert!(object.channels.set_key(
+            Property::CameraFov,
+            0.0,
+            Value::Scalar(500.0),
+            Interpolation::Linear
+        ));
+        assert!(object.apply_channels(0.0));
+        assert_eq!(
+            object.kind,
+            ObjectKind::Camera(camera::Camera {
+                fov_degrees: camera::Camera::MAX_FOV
+            })
+        );
+    }
+
+    #[test]
+    fn evaluating_a_moment_animates_every_object_not_just_the_active_one() {
+        let mut scene = scene_with(3, 2);
+        // Object 0: a one-bone character whose bone turns 90 degrees over
+        // two seconds.
+        scene.objects[0]
+            .skeleton
+            .add_bone("bone", None, glam::Vec3::ZERO);
+        let turn = |degrees: f32| glam::Quat::from_rotation_z(degrees.to_radians());
+        scene.objects[0].timeline.set_key(0.0, vec![turn(0.0)]);
+        scene.objects[0].timeline.set_key(2.0, vec![turn(90.0)]);
+        // Object 1: slides along X over two seconds.
+        scene.objects[1].key_channels(0.0);
+        scene.objects[1].transform.translation = glam::Vec3::new(4.0, 0.0, 0.0);
+        scene.objects[1].key_channels(2.0);
+        // Object 2, the active one, has no animation at all.
+
+        let frames = scene.evaluate_at(1.0);
+        assert_eq!(frames.len(), 3);
+
+        let skinning = frames[0].skinning.as_ref().expect("object 0 has pose keys");
+        let turned = skinning[0].transform_point3(glam::Vec3::X);
+        let half = 0.5f32.sqrt();
+        assert!((turned - glam::Vec3::new(half, half, 0.0)).length() < 1e-4);
+        assert!(!frames[0].placed);
+
+        assert!(frames[1].placed);
+        assert!(frames[1].skinning.is_none());
+        let at = frames[1].model.transform_point3(glam::Vec3::ZERO);
+        assert!((at - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+
+        assert!(!frames[2].placed);
+        assert!(frames[2].skinning.is_none());
+    }
+
+    #[test]
+    fn key_times_and_deleting_keys_cover_the_pose_and_the_channels() {
+        let mut scene = scene_with(1, 0);
+        let object = &mut scene.objects[0];
+        object.timeline.set_key(1.0, vec![]);
+        object.key_channels(1.0);
+        object.key_channels(2.0);
+        assert_eq!(object.key_times().len(), 2);
+
+        assert!(object.remove_keys_near(1.01, 0.05));
+        assert!(object.timeline.keys.is_empty());
+        let times = object.key_times();
+        assert_eq!(times.len(), 1);
+        assert!((times[0] - 2.0).abs() < 1e-6);
+        assert!(!object.remove_keys_near(1.5, 0.05));
+    }
+
+    #[test]
+    fn a_repeat_covers_the_channels_too() {
+        let mut scene = scene_with(1, 0);
+        let object = &mut scene.objects[0];
+        object.timeline.set_key(0.0, vec![]);
+        object.timeline.set_key(1.0, vec![]);
+        object.key_channels(0.0);
+        object.transform.translation = glam::Vec3::new(4.0, 0.0, 0.0);
+        object.key_channels(1.0);
+        assert!(object.timeline.set_cycle_end(2.0));
+
+        let x_at = |object: &mut Object, time: f32| {
+            object.apply_channels(time);
+            object.transform.translation.x
+        };
+        assert!((x_at(object, 1.0) - 4.0).abs() < 1e-4);
+        // Halfway back to the first key.
+        assert!((x_at(object, 1.5) - 2.0).abs() < 1e-4);
+        // The second cycle starts over.
+        assert!(x_at(object, 2.0).abs() < 1e-4);
+        assert!((x_at(object, 2.5) - 2.0).abs() < 1e-4);
+        assert!((x_at(object, 3.0) - 4.0).abs() < 1e-4);
     }
 
     #[test]

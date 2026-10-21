@@ -253,7 +253,11 @@ pub fn undo_last_bone() -> (bool, Option<usize>) {
 /// already at that time is replaced. Returns how many keys there are now.
 #[flutter_rust_bridge::frb(sync)]
 pub fn add_keyframe(time: f32) -> usize {
-    let mut active = crate::scene::active_object();
+    // Everything that is not a bone (placement, look, lens, light) is keyed
+    // at the same moment as the pose. The lock is released before the next
+    // line takes it again.
+    crate::scene::active_object().key_channels(time);
+let mut active = crate::scene::active_object();
     let crate::scene::Object { skeleton, pose, timeline, .. } = &mut *active;
     pose.ensure_covers(&skeleton);
     let rotations: Vec<glam::Quat> = pose
@@ -269,39 +273,41 @@ pub fn add_keyframe(time: f32) -> usize {
 /// The time (seconds) of every keyframe, earliest first.
 #[flutter_rust_bridge::frb(sync)]
 pub fn keyframe_times() -> Vec<f32> {
-    crate::scene::active_object()
-        .timeline
-        .keys
-        .iter()
-        .map(|key| key.time)
-        .collect()
+    crate::scene::active_object().key_times()
 }
 
 /// Deletes the keyframe nearest `time` if one is within 0.05 s of it.
 /// Returns whether a key was removed.
 #[flutter_rust_bridge::frb(sync)]
 pub fn delete_keyframe_at(time: f32) -> bool {
-    crate::scene::active_object()
-        .timeline
-        .remove_near(time, 0.05)
+    crate::scene::active_object().remove_keys_near(time, 0.05)
 }
 
 /// Poses the character as the keyframes say it looks at `time` (seconds).
 /// Returns false, leaving the pose alone, if there are no keyframes.
 #[flutter_rust_bridge::frb(sync)]
 pub fn seek_to_time(time: f32) -> bool {
-    let skin_matrices = {
-        let mut active = crate::scene::active_object();
-        let crate::scene::Object { skeleton, pose, timeline, .. } = &mut *active;
-        let Some(rotations) = timeline.sample(time, skeleton.bones.len()) else {
-            return false;
-        };
-        pose.rotations = rotations;
-        pose.root_offset = timeline.sample_offset(time).unwrap_or(glam::Vec3::ZERO);
-        pose.skinning_matrices(&skeleton)
-    };
-    crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
-    true
+    // Every object in the scene is set to how its animation says it is at
+    // this moment, and then the renderer is told.
+    let frames = crate::scene::evaluate_at(time);
+    let animated = frames
+        .iter()
+        .any(|frame| frame.placed || frame.skinning.is_some());
+    crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        for frame in &frames {
+            if let Some(skinning) = &frame.skinning {
+                renderer.set_object_bone_matrices(frame.index, skinning);
+            }
+            if frame.placed {
+                renderer.set_object_model(frame.index, frame.model);
+                renderer.set_object_material(frame.index, &frame.material);
+            }
+        }
+    });
+    // The animation may have moved the scene camera or changed a light.
+    push_scene_camera();
+    push_scene_lights();
+    animated
 }
 
 /// Makes the keys repeat: a cycle runs from the first key until
@@ -525,10 +531,14 @@ pub fn reset_skeleton() {
         let name = std::mem::take(&mut active.name);
         let transform = active.transform;
         let material = active.material;
+        let kind = active.kind;
+        let channels = std::mem::take(&mut active.channels);
         *active = crate::scene::Object {
             name,
             transform,
             material,
+            kind,
+            channels,
             ..crate::scene::Object::default()
         };
 
@@ -1049,6 +1059,53 @@ pub fn set_active_light(color: (f32, f32, f32), intensity: f32) -> bool {
 fn push_scene_lights() {
     let lights = crate::scene::scene_lights();
     crate::platform::ffi::with_active_renderer(|renderer| renderer.set_lights(&lights));
+}
+
+/// The scene's world as the Properties panel shows it: the background
+/// colour (red, green, blue, each 0 to 1), how strong the soft studio light
+/// on surfaces is, and how strong the studio reflections are (each 0 to 2;
+/// 1 is the usual look).
+pub struct WorldSettings {
+    pub background: (f32, f32, f32),
+    pub ambient: f32,
+    pub reflections: f32,
+}
+
+/// The scene's world.
+#[flutter_rust_bridge::frb(sync)]
+pub fn world_settings() -> WorldSettings {
+    let world = crate::scene::world();
+    WorldSettings {
+        background: (world.background[0], world.background[1], world.background[2]),
+        ambient: world.ambient,
+        reflections: world.reflections,
+    }
+}
+
+/// Sets the scene's world and redraws it. Values outside their ranges are
+/// held inside them. Returns false, changing nothing, for any value that is
+/// not a finite number.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_world_settings(settings: WorldSettings) -> bool {
+    let values = [
+        settings.background.0,
+        settings.background.1,
+        settings.background.2,
+        settings.ambient,
+        settings.reflections,
+    ];
+    if !values.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    let world = crate::scene::world::World {
+        background: [settings.background.0, settings.background.1, settings.background.2],
+        ambient: settings.ambient,
+        reflections: settings.reflections,
+    }
+    .clamped();
+    crate::scene::set_world(world);
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_world(&world));
+    true
 }
 
 /// Tells the renderer which scene camera to look through, where it is, its

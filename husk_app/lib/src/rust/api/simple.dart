@@ -360,6 +360,16 @@ bool setActiveLight({
   intensity: intensity,
 );
 
+/// The scene's world.
+WorldSettings worldSettings() =>
+    RustLib.instance.api.crateApiSimpleWorldSettings();
+
+/// Sets the scene's world and redraws it. Values outside their ranges are
+/// held inside them. Returns false, changing nothing, for any value that is
+/// not a finite number.
+bool setWorldSettings({required WorldSettings settings}) =>
+    RustLib.instance.api.crateApiSimpleSetWorldSettings(settings: settings);
+
 /// Starts or stops looking through the scene camera (the first camera in
 /// the scene). Returns whether the viewport is looking through it now:
 /// false when asked to start but the scene has no camera.
@@ -478,4 +488,33 @@ class ObjectTransform {
           position == other.position &&
           rotationDegrees == other.rotationDegrees &&
           scale == other.scale;
+}
+
+/// The scene's world as the Properties panel shows it: the background
+/// colour (red, green, blue, each 0 to 1), how strong the soft studio light
+/// on surfaces is, and how strong the studio reflections are (each 0 to 2;
+/// 1 is the usual look).
+class WorldSettings {
+  final (double, double, double) background;
+  final double ambient;
+  final double reflections;
+
+  const WorldSettings({
+    required this.background,
+    required this.ambient,
+    required this.reflections,
+  });
+
+  @override
+  int get hashCode =>
+      background.hashCode ^ ambient.hashCode ^ reflections.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is WorldSettings &&
+          runtimeType == other.runtimeType &&
+          background == other.background &&
+          ambient == other.ambient &&
+          reflections == other.reflections;
 }

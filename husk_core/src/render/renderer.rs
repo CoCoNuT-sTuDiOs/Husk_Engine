@@ -160,6 +160,9 @@ pub struct Renderer {
     bone_bind_group_layout: wgpu::BindGroupLayout,
     lights_buffer: wgpu::Buffer,
     lights_bind_group: wgpu::BindGroup,
+    world_buffer: wgpu::Buffer,
+    world_bind_group: wgpu::BindGroup,
+    clear_color: wgpu::Color,
     frame_time_total: Duration,
     frame_time_count: u32,
     #[allow(dead_code)]
@@ -313,14 +316,45 @@ impl Renderer {
             }],
         });
 
+        let world_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("husk_world_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let world_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("husk_world_buffer"),
+            contents: bytemuck::bytes_of(&crate::scene::world::World::default().shader_values()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let world_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("husk_world_bind_group"),
+            layout: &world_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: world_buffer.as_entire_binding(),
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("husk_pipeline_layout"),
+        label: Some("husk_pipeline_layout"),
             bind_group_layouts: &[
                 &bind_group_layout,
                 &bone_bind_group_layout,
                 &lights_bind_group_layout,
+                &world_bind_group_layout,
             ],
-            push_constant_ranges: &[],
+                push_constant_ranges: &[],
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -405,6 +439,14 @@ impl Renderer {
             bone_bind_group_layout,
             lights_buffer,
             lights_bind_group,
+            world_buffer,
+            world_bind_group,
+            clear_color: wgpu::Color {
+                r: 0.05,
+                g: 0.05,
+                b: 0.08,
+                a: 1.0,
+            },
             frame_time_total: Duration::ZERO,
             frame_time_count: 0,
             depth_texture,
@@ -617,11 +659,6 @@ impl Renderer {
         (index, model, CAMERA_COLOR)
     }
 
-    /// Adds a light, drawn as `mesh` (a small proxy shape), above and to
-    /// the side of what the viewport is looking at, at a distance that
-    /// scales with the viewing distance, and facing the orbit target. The
-    /// shape is sized like the camera shape. Returns its index, its
-    /// placement matrix and its colour. The active object does not change.
     pub fn add_light_at_view(
         &mut self,
         mesh: crate::geometry::mesh::MeshData,
@@ -843,9 +880,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.05,
-                            g: 0.05,
-                            b: 0.08,
+                            r: self.clear_color.r,
+                            g: self.clear_color.g,
+                            b: self.clear_color.b,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -865,6 +902,7 @@ impl Renderer {
 
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(2, &self.lights_bind_group, &[]);
+            pass.set_bind_group(3, &self.world_bind_group, &[]);
             for object in &self.objects {
                 pass.set_bind_group(0, &object.bind_group, &[]);
                 pass.set_bind_group(1, &object.bone_bind_group, &[]);
@@ -988,13 +1026,42 @@ impl Renderer {
             .write_buffer(&object.vertex_buffer, 0, bytemuck::cast_slice(&updated));
     }
 
-    pub fn set_bone_matrices(&self, matrices: &[glam::Mat4]) {
+    /// Like `set_bone_matrices`, for the object at `index` rather than the
+    /// active one. Does nothing for an unknown index.
+    pub fn set_object_bone_matrices(&self, index: usize, matrices: &[glam::Mat4]) {
+        let Some(object) = self.objects.get(index) else {
+            return;
+        };
         let mut data: Vec<[[f32; 4]; 4]> = matrices.iter().map(|m| m.to_cols_array_2d()).collect();
+        data.resize(MAX_BONES, glam::Mat4::IDENTITY.to_cols_array_2d());
+        self.queue
+            .write_buffer(&object.bone_matrices_buffer, 0, bytemuck::cast_slice(&data));
+    }
+
+    pub fn set_bone_matrices(&self, matrices: &[glam::Mat4]) {
+    let mut data: Vec<[[f32; 4]; 4]> = matrices.iter().map(|m| m.to_cols_array_2d()).collect();
         data.resize(MAX_BONES, glam::Mat4::IDENTITY.to_cols_array_2d());
         self.queue.write_buffer(
             &self.objects[self.active_object].bone_matrices_buffer,
             0,
             bytemuck::cast_slice(&data),
+        );
+    }
+
+    /// Tells the renderer what the world looks like: the colour behind the
+    /// objects and how strong the studio light is. The scene is the source
+    /// of truth, so this is called after anything that changes it.
+    pub fn set_world(&mut self, world: &crate::scene::world::World) {
+        self.clear_color = wgpu::Color {
+            r: world.background[0] as f64,
+            g: world.background[1] as f64,
+            b: world.background[2] as f64,
+            a: 1.0,
+        };
+        self.queue.write_buffer(
+            &self.world_buffer,
+            0,
+            bytemuck::bytes_of(&world.shader_values()),
         );
     }
 

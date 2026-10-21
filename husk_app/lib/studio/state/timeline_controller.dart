@@ -119,6 +119,15 @@ class TimelineController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Re-reads the key times and travel setting without moving the playhead
+  /// or stopping playback. For when another object becomes the active one:
+  /// each object has its own keys.
+  void reloadKeys() {
+    _refreshKeys();
+    _travelSpeed = rust.travelSpeed();
+    notifyListeners();
+  }
+
   void refresh() {
     if (_playing) _stopPlayback();
     _refreshKeys();

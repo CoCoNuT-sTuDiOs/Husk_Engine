@@ -37,14 +37,29 @@ class _StudioShellState extends State<StudioShell> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKey);
+    _lastActiveObject = _studio.objectList.$2;
+    _studio.addListener(_onStudioChanged);
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
+    _studio.removeListener(_onStudioChanged);
     _studio.dispose();
     _timeline.dispose();
     super.dispose();
+  }
+
+  // The active object when the timeline last read its keys.
+  int _lastActiveObject = 0;
+
+  /// Each object has its own keys, so when another object becomes the
+  /// active one the timeline re-reads them (without moving the playhead).
+  void _onStudioChanged() {
+    final active = _studio.objectList.$2;
+    if (active == _lastActiveObject) return;
+    _lastActiveObject = active;
+    _timeline.reloadKeys();
   }
 
   /// The window-wide shortcuts. Each one runs the same command as its menu

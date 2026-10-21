@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 990035288;
+  int get rustContentHash => 223279695;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -254,6 +254,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt boneIndex,
   });
 
+  bool crateApiSimpleSetWorldSettings({required WorldSettings settings});
+
   List<String> crateApiSimpleShapeNames();
 
   Future<Uint8List?> crateApiSimpleShapePreview({
@@ -264,6 +266,8 @@ abstract class RustLibApi extends BaseApi {
   double crateApiSimpleTravelSpeed();
 
   (bool, BigInt?) crateApiSimpleUndoLastBone();
+
+  WorldSettings crateApiSimpleWorldSettings();
 
   void crateApiSimpleZoomCamera({required double factor});
 }
@@ -1657,12 +1661,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  bool crateApiSimpleSetWorldSettings({required WorldSettings settings}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_world_settings(settings, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleSetWorldSettingsConstMeta,
+        argValues: [settings],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleSetWorldSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_world_settings",
+        argNames: ["settings"],
+      );
+
+  @override
   List<String> crateApiSimpleShapeNames() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 56)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_list_String,
@@ -1692,7 +1722,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 57,
             port: port_,
           );
         },
@@ -1718,7 +1748,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 57)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_f_32,
@@ -1740,7 +1770,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_record_bool_opt_box_autoadd_usize,
@@ -1757,13 +1787,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "undo_last_bone", argNames: []);
 
   @override
+  WorldSettings crateApiSimpleWorldSettings() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_world_settings,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleWorldSettingsConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleWorldSettingsConstMeta =>
+      const TaskConstMeta(debugName: "world_settings", argNames: []);
+
+  @override
   void crateApiSimpleZoomCamera({required double factor}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_f_64(factor, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 61)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -1860,6 +1912,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BigInt dco_decode_box_autoadd_usize(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_usize(raw);
+  }
+
+  @protected
+  WorldSettings dco_decode_box_autoadd_world_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_world_settings(raw);
   }
 
   @protected
@@ -2205,6 +2263,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  WorldSettings dco_decode_world_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return WorldSettings(
+      background: dco_decode_record_f_32_f_32_f_32(arr[0]),
+      ambient: dco_decode_f_32(arr[1]),
+      reflections: dco_decode_f_32(arr[2]),
+    );
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -2302,6 +2373,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BigInt sse_decode_box_autoadd_usize(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_usize(deserializer));
+  }
+
+  @protected
+  WorldSettings sse_decode_box_autoadd_world_settings(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_world_settings(deserializer));
   }
 
   @protected
@@ -2704,6 +2783,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  WorldSettings sse_decode_world_settings(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_background = sse_decode_record_f_32_f_32_f_32(deserializer);
+    var var_ambient = sse_decode_f_32(deserializer);
+    var var_reflections = sse_decode_f_32(deserializer);
+    return WorldSettings(
+      background: var_background,
+      ambient: var_ambient,
+      reflections: var_reflections,
+    );
+  }
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
@@ -2812,6 +2904,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_usize(BigInt self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_world_settings(
+    WorldSettings self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_world_settings(self, serializer);
   }
 
   @protected
@@ -3209,6 +3310,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_usize(BigInt self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putBigUint64(self);
+  }
+
+  @protected
+  void sse_encode_world_settings(WorldSettings self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_record_f_32_f_32_f_32(self.background, serializer);
+    sse_encode_f_32(self.ambient, serializer);
+    sse_encode_f_32(self.reflections, serializer);
   }
 
   @protected

@@ -26,6 +26,11 @@ struct LightsUniform {
 };
 @group(2) @binding(0)
 var<uniform> lights: LightsUniform;
+
+// The world: x is how strong the soft studio light on surfaces is, y how
+// strong the studio reflections are.
+@group(3) @binding(0)
+var<uniform> world: vec4<f32>;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -195,14 +200,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // reflection, which is what makes metal look like metal.
     let sky_amount = n.y * 0.5 + 0.5;
     let ambient_light = mix(vec3<f32>(0.20, 0.20, 0.22), vec3<f32>(0.55, 0.57, 0.62), sky_amount);
-    let diffuse_ambient = albedo * (1.0 - metalness) * ambient_light * 0.6;
-
+    let diffuse_ambient = albedo * (1.0 - metalness) * ambient_light * 0.6 * world.x;
     let reflected = reflect(-v, n);
     let environment = studio_environment(reflected, roughness);
     let f_environment = f0
         + (max(vec3<f32>(1.0 - roughness), f0) - f0) * pow(1.0 - n_dot_v, 5.0);
-    let specular_ambient = environment * f_environment;
-
+    let specular_ambient = environment * f_environment * world.y;
+    
     let lit_color = soft_clip(direct + diffuse_ambient + specular_ambient);
     return vec4<f32>(lit_color, 1.0);
 }
