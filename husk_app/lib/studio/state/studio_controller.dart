@@ -84,8 +84,6 @@ BigInt? get selectedBone => _selectedBone;
     notifyListeners();
   }
 
-  /// Places a bone where the click lands on the model, with the selected
-  /// joint as its parent. Returns a message when the click missed.
   String? placeBoneAt(double x, double y) {
     // Bones are placed against the rest-pose mesh, so go back to rest first.
     rust.resetPose();
@@ -145,8 +143,6 @@ BigInt? get selectedBone => _selectedBone;
   /// The finished video's width, height (pixels) and frame rate.
   (int, int, int) get outputSettings => rust.outputSettings();
 
-  /// Sets the finished video's width, height and frame rate. The engine
-  /// holds them inside their ranges and makes the sides even.
   void setOutputSettings(int width, int height, int fps) {
     rust.setOutputSettings(width: width, height: height, fps: fps);
     notifyListeners();
@@ -187,8 +183,6 @@ BigInt? get selectedBone => _selectedBone;
   /// otherwise null.
   double? get activeCameraFov => rust.activeCameraFov();
 
-  /// Sets the active camera's field of view. Returns false if the engine
-  /// refused it (the active object is not a camera).
   bool setActiveCameraFov(double degrees) {
     final applied = rust.setActiveCameraFov(degrees: degrees);
     if (applied) notifyListeners();
@@ -211,8 +205,6 @@ BigInt? get selectedBone => _selectedBone;
   /// it.
   rust.ObjectMaterial get activeMaterial => rust.activeObjectMaterial();
 
-  /// Applies [material] to the active object. Returns false if the engine
-  /// refused it (a value that is not a finite number).
   bool setActiveMaterial(rust.ObjectMaterial material) {
     final applied = rust.setActiveObjectMaterial(material: material);
     if (applied) notifyListeners();
@@ -279,6 +271,41 @@ BigInt? get selectedBone => _selectedBone;
     return (names, active.toInt());
   }
 
+  /// For each object, in list order, the index of its parent, or null at
+  /// the top level. The Rust core owns the hierarchy; this only reads it.
+  List<int?> get objectParents =>
+      rust.objectParents().map((parent) => parent?.toInt()).toList();
+
+  /// Hangs the object at [child] below the one at [parent], or frees it when
+  /// [parent] is null. It stays where it is. Returns a message.
+  String setParent(int child, int? parent) {
+    final applied = rust.setObjectParent(
+      child: BigInt.from(child),
+      parent: parent == null ? null : BigInt.from(parent),
+    );
+    if (!applied) return 'Could not parent that object (it would make a loop)';
+    notifyListeners();
+    return parent == null ? 'Freed from its parent' : 'Parented';
+  }
+
+  /// For each object, in list order, the bone of its parent that it follows
+  /// through the pose, or null.
+  List<int?> get objectBoneParents =>
+      rust.objectBoneParents().map((bone) => bone?.toInt()).toList();
+
+  /// Makes the object at [child] follow bone [bone] of the object at
+  /// [parent] through the pose. It stays where it is. Returns a message.
+  String setBoneParent(int child, int parent, int bone) {
+    final applied = rust.setObjectBoneParent(
+      child: BigInt.from(child),
+      parent: BigInt.from(parent),
+      bone: BigInt.from(bone),
+    );
+    if (!applied) return 'Could not attach that object to the bone';
+    notifyListeners();
+    return 'Attached to bone $bone';
+  }
+
   /// Makes the object at [index] the active one.
   void selectObject(int index) {
     if (!rust.selectObject(index: BigInt.from(index))) return;
@@ -311,7 +338,8 @@ BigInt? get selectedBone => _selectedBone;
   /// Removes the last placed bone and selects its parent. Returns a message
   /// when there is nothing to undo.
   String? undoLastBone() {
-    final (removed, parent) = rust.undoLastBone();
+final (removed, parent) = rust.undoLastBone();
+    rust.refreshModels();
     if (!removed) return 'Nothing to undo';
     _selectedBone = parent;
     notifyListeners();
@@ -334,11 +362,10 @@ BigInt? get selectedBone => _selectedBone;
 
   void resetPose() {
     rust.resetPose();
+    rust.refreshModels();
     notifyListeners();
   }
 
-  /// Clears the skeleton, weights and keys. The timeline controller must
-  /// refresh afterwards.
   void resetSkeleton() {
     rust.resetSkeleton();
     _selectedBone = null;

@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 223279695;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1661507092;
 
 // Section: executor
 
@@ -939,6 +939,64 @@ fn wire__crate__api__simple__move_character_impl(
         },
     )
 }
+fn wire__crate__api__simple__object_bone_parents_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "object_bone_parents",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>(crate::api::simple::object_bone_parents())?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__simple__object_parents_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "object_parents",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>(crate::api::simple::object_parents())?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__simple__orbit_camera_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1060,6 +1118,37 @@ fn wire__crate__api__simple__place_bone_impl(
             transform_result_sse::<_, ()>((move || {
                 let output_ok =
                     Ok::<_, ()>(crate::api::simple::place_bone(api_x, api_y, api_parent))?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__simple__refresh_models_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "refresh_models",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>({
+                    crate::api::simple::refresh_models();
+                })?;
                 std::result::Result::Ok(output_ok)
             })())
         },
@@ -1594,6 +1683,72 @@ fn wire__crate__api__simple__set_camera_view_impl(
             deserializer.end();
             transform_result_sse::<_, ()>((move || {
                 let output_ok = Ok::<_, ()>(crate::api::simple::set_camera_view(api_on))?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__simple__set_object_bone_parent_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_object_bone_parent",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_child = <usize>::sse_decode(&mut deserializer);
+            let api_parent = <usize>::sse_decode(&mut deserializer);
+            let api_bone = <usize>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>(crate::api::simple::set_object_bone_parent(
+                    api_child, api_parent, api_bone,
+                ))?;
+                std::result::Result::Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__simple__set_object_parent_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_object_parent",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_child = <usize>::sse_decode(&mut deserializer);
+            let api_parent = <Option<usize>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok =
+                    Ok::<_, ()>(crate::api::simple::set_object_parent(api_child, api_parent))?;
                 std::result::Result::Ok(output_ok)
             })())
         },
@@ -2372,7 +2527,7 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         25 => wire__crate__api__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__simple__shape_preview_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__simple__shape_preview_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2413,41 +2568,46 @@ fn pde_ffi_dispatcher_sync_impl(
         27 => wire__crate__api__simple__keyframe_times_impl(ptr, rust_vec_len, data_len),
         28 => wire__crate__api__simple__load_project_impl(ptr, rust_vec_len, data_len),
         29 => wire__crate__api__simple__move_character_impl(ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__simple__orbit_camera_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__simple__output_settings_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__simple__pick_impl(ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__simple__place_bone_impl(ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__simple__remove_active_object_impl(ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__simple__repeat_period_impl(ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__simple__reset_pose_impl(ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__simple__reset_skeleton_impl(ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__simple__ring_drag_angle_impl(ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__simple__rotate_bone_impl(ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__simple__rotated_euler_degrees_impl(ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__simple__save_project_impl(ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__simple__scene_objects_impl(ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__simple__seek_to_time_impl(ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__simple__select_object_impl(ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__simple__select_object_at_impl(ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__simple__set_active_camera_fov_impl(ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__simple__set_active_light_impl(ptr, rust_vec_len, data_len),
-        48 => {
+        30 => wire__crate__api__simple__object_bone_parents_impl(ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__simple__object_parents_impl(ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__simple__orbit_camera_impl(ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__simple__output_settings_impl(ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__simple__pick_impl(ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__simple__place_bone_impl(ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__simple__refresh_models_impl(ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__simple__remove_active_object_impl(ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__simple__repeat_period_impl(ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__simple__reset_pose_impl(ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__simple__reset_skeleton_impl(ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__simple__ring_drag_angle_impl(ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__simple__rotate_bone_impl(ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__simple__rotated_euler_degrees_impl(ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__simple__save_project_impl(ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__simple__scene_objects_impl(ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__simple__seek_to_time_impl(ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__simple__select_object_impl(ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__simple__select_object_at_impl(ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__simple__set_active_camera_fov_impl(ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__simple__set_active_light_impl(ptr, rust_vec_len, data_len),
+        51 => {
             wire__crate__api__simple__set_active_object_material_impl(ptr, rust_vec_len, data_len)
         }
-        49 => {
+        52 => {
             wire__crate__api__simple__set_active_object_transform_impl(ptr, rust_vec_len, data_len)
         }
-        50 => wire__crate__api__simple__set_camera_view_impl(ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__simple__set_output_settings_impl(ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__simple__set_repeat_end_impl(ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__simple__set_travel_speed_impl(ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__simple__set_vertex_weight_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__simple__set_world_settings_impl(ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__simple__shape_names_impl(ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__simple__travel_speed_impl(ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__simple__undo_last_bone_impl(ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__simple__world_settings_impl(ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__simple__zoom_camera_impl(ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__simple__set_camera_view_impl(ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__simple__set_object_bone_parent_impl(ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__simple__set_object_parent_impl(ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__simple__set_output_settings_impl(ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__simple__set_repeat_end_impl(ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__simple__set_travel_speed_impl(ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__simple__set_vertex_weight_impl(ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__simple__set_world_settings_impl(ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__simple__shape_names_impl(ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__simple__travel_speed_impl(ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__simple__undo_last_bone_impl(ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__simple__world_settings_impl(ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__simple__zoom_camera_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

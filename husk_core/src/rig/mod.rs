@@ -45,9 +45,6 @@ impl Skeleton {
         self.bones.len() - 1
     }
 
-    /// Computes each bone's bind-pose transform in model space, by
-    /// composing local transforms up the parent chain. Index `i` in the
-    /// returned Vec is bone `i`'s world-space bind matrix.
     pub fn world_bind_matrices(&self) -> Vec<glam::Mat4> {
         let mut world = vec![glam::Mat4::IDENTITY; self.bones.len()];
         for i in 0..self.bones.len() {

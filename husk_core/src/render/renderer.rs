@@ -729,8 +729,6 @@ impl Renderer {
     }
 
 
-    /// Adjusts the camera's orbit angles by the given deltas (radians).
-    /// Pitch is clamped to avoid flipping over at the poles.
     pub fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
         self.orbit_yaw += delta_yaw;
         self.orbit_pitch = (self.orbit_pitch + delta_pitch).clamp(-1.5, 1.5);
@@ -742,8 +740,6 @@ impl Renderer {
         self.orbit_distance = (self.orbit_distance * factor).clamp(0.3, 500.0);
     }
 
-/// Changes the render size so the viewport can follow its panel.
-    /// Recreates only the size-dependent GPU resources.
     pub fn resize(&mut self, width: u32, height: u32) {
         let width = width.clamp(16, 4096);
         let height = height.clamp(16, 4096);
@@ -956,10 +952,6 @@ impl Renderer {
                 // No padding needed — common case at aligned resolutions.
                 self.last_frame.extend_from_slice(&mapped);
             } else {
-                // Strip each row's padding, keeping only the real pixel
-                // bytes, so everything downstream (the Flutter pixel
-                // buffer, in particular) still sees a tightly-packed
-                // image at exactly width * height * 4 bytes.
                 for row in 0..self.height as usize {
                     let start = row * padded_bytes_per_row as usize;
                     let end = start + unpadded_bytes_per_row as usize;
@@ -993,9 +985,6 @@ impl Renderer {
         self.last_frame.len()
     }
 
-    /// The active mesh's raw vertex positions, in the same order used
-    /// everywhere else (skinning, picking) needed so weight computation
-    /// can be done against whatever mesh is actually loaded right now.
     pub fn mesh_positions(&self) -> &[[f32; 3]] {
         &self.objects[self.active_object].mesh_data.positions
     }
@@ -1026,8 +1015,6 @@ impl Renderer {
             .write_buffer(&object.vertex_buffer, 0, bytemuck::cast_slice(&updated));
     }
 
-    /// Like `set_bone_matrices`, for the object at `index` rather than the
-    /// active one. Does nothing for an unknown index.
     pub fn set_object_bone_matrices(&self, index: usize, matrices: &[glam::Mat4]) {
         let Some(object) = self.objects.get(index) else {
             return;

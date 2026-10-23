@@ -46,7 +46,7 @@ pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer
             Err(e) => {
                 eprintln!("Husk: rigged test model not loaded ({e}), trying the plain mesh");
                 let mesh = crate::import::mesh::load_gltf(
-                "C:\\Users\\HomePC\\Downloads\\the_amazing_spiderman.glb",
+                "C:\\Users\\HomePC\\Downloads\\girl.glb", 
                     MAX_DESKTOP_TRIANGLES,
                 )
                 .unwrap_or_else(|e| {

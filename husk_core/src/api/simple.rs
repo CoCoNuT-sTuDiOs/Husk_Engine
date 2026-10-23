@@ -298,8 +298,10 @@ pub fn seek_to_time(time: f32) -> bool {
             if let Some(skinning) = &frame.skinning {
                 renderer.set_object_bone_matrices(frame.index, skinning);
             }
+            // A child follows its parent even when it has no keys of its own.
+            renderer.set_object_model(frame.index, frame.model);
             if frame.placed {
-                renderer.set_object_model(frame.index, frame.model);
+            // (the placement is set above, for every object)
                 renderer.set_object_material(frame.index, &frame.material);
             }
         }
@@ -727,6 +729,8 @@ pub fn set_active_object_transform(transform: ObjectTransform) -> bool {
     if applied != Some(true) {
         eprintln!("Husk: the scene moved object {index} but the renderer did not; the two lists are out of step");
     }
+// Children follow their parent, so every drawn placement is refreshed.
+    push_scene_models();
     // The object may be the scene camera or a light.
     push_scene_camera();
     push_scene_lights();
@@ -1051,6 +1055,69 @@ pub fn set_active_light(color: (f32, f32, f32), intensity: f32) -> bool {
         push_scene_lights();
     }
     applied
+}
+
+/// Hangs the object at `child` below the object at `parent`, or frees it
+/// (`parent` None). The object stays where it is. False, changing nothing,
+/// for an unknown index or a loop (a parent below its own child).
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_object_parent(child: usize, parent: Option<usize>) -> bool {
+    let changed = crate::scene::set_parent(child, parent);
+    if changed {
+        push_scene_models();
+        push_scene_camera();
+        push_scene_lights();
+    }
+    changed
+}
+
+/// For each object, in list order, the index of its parent (None at the
+/// top level).
+#[flutter_rust_bridge::frb(sync)]
+pub fn object_parents() -> Vec<Option<usize>> {
+    crate::scene::object_parents()
+}
+
+/// Makes the object at `child` follow bone `bone` of the object at `parent`
+/// through the pose, staying where it is. False, changing nothing, for an
+/// unknown object, a bone the parent does not have, or a loop.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_object_bone_parent(child: usize, parent: usize, bone: usize) -> bool {
+    let changed = crate::scene::set_parent_to_bone(child, parent, bone);
+    if changed {
+        push_scene_models();
+        push_scene_camera();
+        push_scene_lights();
+    }
+    changed
+}
+
+/// For each object, in list order, the bone of its parent that it follows
+/// (None for an object that does not follow a bone).
+#[flutter_rust_bridge::frb(sync)]
+pub fn object_bone_parents() -> Vec<Option<usize>> {
+    crate::scene::object_bone_parents()
+}
+
+/// Brings every drawn placement up to date with the scene. Call after
+/// anything that changes a pose, so parts that follow bones follow it.
+#[flutter_rust_bridge::frb(sync)]
+pub fn refresh_models() {
+    push_scene_models();
+    push_scene_camera();
+    push_scene_lights();
+}
+
+/// Tells the renderer where every object is drawn: its world placement,
+/// parents included. The scene is the source of truth, so this is called
+/// after anything that moves an object that may have children.
+fn push_scene_models() {
+    let models = crate::scene::world_matrices();
+    crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        for (index, model) in models.iter().enumerate() {
+            renderer.set_object_model(index, *model);
+        }
+    });
 }
 
 /// Tells the renderer which lights the scene has and where they are. The

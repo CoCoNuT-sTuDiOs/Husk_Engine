@@ -47,6 +47,22 @@ pub fn compute_geodesic_weights(
     positions: &[[f32; 3]],
     indices: &[u32],
 ) -> Option<Vec<VertexWeights>> {
+    let mut weights =
+        unrestricted_geodesic_weights(skeleton, world_bind_matrices, positions, indices)?;
+    // Parts too fine for the voxel grid (fingers a hair apart) can look
+    // joined to it, but the skeleton knows they are on different branches.
+    restrict_to_chain(&mut weights, skeleton);
+    Some(weights)
+}
+
+/// The geodesic weights exactly as the flood fill gives them, before the
+/// skeleton is used to drop influences from other branches.
+fn unrestricted_geodesic_weights(
+skeleton: &Skeleton,
+    world_bind_matrices: &[glam::Mat4],
+    positions: &[[f32; 3]],
+    indices: &[u32],
+) -> Option<Vec<VertexWeights>> {
     if skeleton.bones.is_empty() || skeleton.bones.len() >= GPU_BONE_SLOTS {
         return None;
     }
@@ -125,7 +141,14 @@ pub fn compute_geodesic_weights(
             };
             let d = distances[grid.index(*cell)];
             if d != u32::MAX {
-                reached[vertex_index].push((bone_index as u32, d as f32 / 10.0 * cell_size));
+// The grid measures in whole cells, so two bones a little under a
+                // cell apart can look equally far. The straight line is a floor
+                // the true distance cannot beat, and a tiny share of it breaks
+                // the ties toward the nearer bone.
+                let geodesic = d as f32 / 10.0 * cell_size;
+                let straight = distance_to_segments(Vec3::from(positions[vertex_index]), segments);
+                reached[vertex_index]
+                    .push((bone_index as u32, geodesic.max(straight) + 0.001 * straight));
             }
         }
     }
@@ -162,9 +185,58 @@ pub fn compute_geodesic_weights(
     Some(weights)
 }
 
+/// Keeps, for every vertex, only the influences it can sensibly share with
+/// its strongest bone (the first slot): that bone itself, its parent and
+/// its children. Bones on other branches (the next finger, the other leg)
+/// are dropped and what is left is renormalized. Vertices held by the
+/// "stays put" influence, and that influence itself, are left alone.
+fn restrict_to_chain(weights: &mut [VertexWeights], skeleton: &Skeleton) {
+    let bone_count = skeleton.bones.len();
+    for vertex in weights.iter_mut() {
+        let strongest = vertex.joint_indices[0] as usize;
+        if strongest >= bone_count {
+            continue;
+        }
+        let mut total = 0.0f32;
+        for slot in 0..INFLUENCES {
+            let bone = vertex.joint_indices[slot] as usize;
+            let allowed = bone >= bone_count
+                || bone == strongest
+                || skeleton.bones[strongest].parent == Some(bone)
+                || skeleton.bones[bone].parent == Some(strongest);
+            if !allowed {
+                vertex.weights[slot] = 0.0;
+            }
+            total += vertex.weights[slot];
+        }
+        if total > 1e-6 {
+            for slot in 0..INFLUENCES {
+                vertex.weights[slot] /= total;
+            }
+        }
+    }
+}
+
+ /// How far `point` is, in a straight line, from the nearest of `segments`.
+fn distance_to_segments(point: Vec3, segments: &[(Vec3, Vec3)]) -> f32 {
+    segments
+        .iter()
+        .map(|&(head, tail)| {
+            let along = tail - head;
+            let length_squared = along.length_squared();
+            let t = if length_squared > 1e-12 {
+                ((point - head).dot(along) / length_squared).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (point - (head + along * t)).length()
+        })
+        .fold(f32::MAX, f32::min)
+}
+
 /// The 26 neighbors of a cell with integer chamfer costs
 /// (10 = straight, 14 = face diagonal, 17 = corner diagonal).
-fn neighbor_offsets() -> Vec<(isize, isize, isize, u32)> {
+fn neighbor_offsets()-> Vec<(isize, isize, isize, u32)> {
     let mut offsets = Vec::with_capacity(26);
     for dz in -1..=1isize {
         for dy in -1..=1isize {
@@ -382,7 +454,187 @@ mod tests {
     }
 
     #[test]
-    fn lower_left_leg_ignores_the_right_leg_bones() {
+    fn restricting_to_the_chain_drops_other_branches_and_renormalizes() {
+        // 0 is the root; 1 and 2 are its children; 3 is a child of 1.
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, Vec3::ZERO);
+        let one = skeleton.add_bone("one", Some(root), Vec3::new(1.0, 0.0, 0.0));
+        skeleton.add_bone("two", Some(root), Vec3::new(-1.0, 0.0, 0.0));
+        skeleton.add_bone("three", Some(one), Vec3::new(1.0, 0.0, 0.0));
+
+        // Strongest bone 1: its sibling 2 goes; its parent 0 and child 3 stay.
+        let mut weights = vec![VertexWeights {
+            joint_indices: [1, 2, 0, 3],
+            weights: [0.4, 0.3, 0.2, 0.1],
+        }];
+        restrict_to_chain(&mut weights, &skeleton);
+        let w = weights[0];
+        assert_eq!(w.weights[1], 0.0);
+        assert!((w.weights.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+        assert!((w.weights[0] - 0.4 / 0.7).abs() < 1e-5);
+        assert!((w.weights[2] - 0.2 / 0.7).abs() < 1e-5);
+        assert!((w.weights[3] - 0.1 / 0.7).abs() < 1e-5);
+
+        // Strongest bone 3: its parent 1 stays; bone 0 (a grandparent) and
+        // bone 2 (another branch) go.
+        let mut weights = vec![VertexWeights {
+            joint_indices: [3, 1, 0, 2],
+            weights: [0.5, 0.3, 0.1, 0.1],
+        }];
+        restrict_to_chain(&mut weights, &skeleton);
+        let w = weights[0];
+        assert_eq!(w.weights[2], 0.0);
+        assert_eq!(w.weights[3], 0.0);
+        assert!((w.weights[0] - 0.5 / 0.8).abs() < 1e-5);
+        assert!((w.weights[1] - 0.3 / 0.8).abs() < 1e-5);
+    }
+
+    #[test]
+    fn restricting_leaves_vertices_held_by_the_stays_put_influence_alone() {
+        let mut skeleton = Skeleton::default();
+        skeleton.add_bone("root", None, Vec3::ZERO);
+
+        // Held by "stays put": nothing changes.
+        let original = VertexWeights {
+            joint_indices: [STATIC_INFLUENCE_INDEX, 0, 0, 0],
+            weights: [0.7, 0.3, 0.0, 0.0],
+        };
+        let mut weights = vec![original];
+        restrict_to_chain(&mut weights, &skeleton);
+        assert_eq!(weights[0].joint_indices, original.joint_indices);
+        assert_eq!(weights[0].weights, original.weights);
+
+        // Held by a bone, with a share on "stays put": that share stays.
+        let mut weights = vec![VertexWeights {
+            joint_indices: [0, STATIC_INFLUENCE_INDEX, STATIC_INFLUENCE_INDEX, STATIC_INFLUENCE_INDEX],
+            weights: [0.6, 0.4, 0.0, 0.0],
+        }];
+        restrict_to_chain(&mut weights, &skeleton);
+        assert!((weights[0].weights[0] - 0.6).abs() < 1e-5);
+        assert!((weights[0].weights[1] - 0.4).abs() < 1e-5);
+    }
+
+    /// A forearm, a palm and two fingers a hair apart, in real-life
+    /// proportions: 1.8 tall overall, each finger 0.017 wide with a 0.003
+    /// gap, far finer than one cell of the voxel grid (about 0.009).
+    fn hand_mesh() -> (Vec<[f32; 3]>, Vec<u32>) {
+        let parts = [
+            box_mesh(Vec3::new(-0.04, 0.0, -0.04), Vec3::new(0.04, 1.6, 0.04)),
+            box_mesh(Vec3::new(-0.0185, 1.6, -0.008), Vec3::new(0.0185, 1.7, 0.008)),
+            box_mesh(Vec3::new(-0.0185, 1.7, -0.008), Vec3::new(-0.0015, 1.8, 0.008)),
+            box_mesh(Vec3::new(0.0015, 1.7, -0.008), Vec3::new(0.0185, 1.8, 0.008)),
+        ];
+        let mut positions: Vec<[f32; 3]> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        for (part_positions, part_indices) in parts.iter() {
+            let offset = positions.len() as u32;
+            positions.extend(part_positions.iter().copied());
+            indices.extend(part_indices.iter().map(|i| i + offset));
+        }
+        (positions, indices)
+    }
+
+    /// Bones: 0 arm, 1 palm, 2 and 3 the first finger's two joints, 4 and 5
+    /// the second finger's.
+    fn hand_skeleton() -> (Skeleton, Vec<glam::Mat4>) {
+        let mut skeleton = Skeleton::default();
+        let arm = skeleton.add_bone("arm", None, Vec3::new(0.0, 0.8, 0.0));
+        let palm = skeleton.add_bone("palm", Some(arm), Vec3::new(0.0, 0.85, 0.0));
+        let a1 = skeleton.add_bone("a1", Some(palm), Vec3::new(-0.0085, 0.05, 0.0));
+        skeleton.add_bone("a2", Some(a1), Vec3::new(0.0, 0.05, 0.0));
+        let b1 = skeleton.add_bone("b1", Some(palm), Vec3::new(0.0085, 0.05, 0.0));
+        skeleton.add_bone("b2", Some(b1), Vec3::new(0.0, 0.05, 0.0));
+        let world = skeleton.world_bind_matrices();
+        (skeleton, world)
+    }
+
+    /// How much of a vertex's weight sits on the given bones.
+    fn share_on(vertex: &VertexWeights, bones: &[u32]) -> f32 {
+        (0..INFLUENCES)
+            .filter(|&slot| bones.contains(&vertex.joint_indices[slot]))
+            .map(|slot| vertex.weights[slot])
+            .sum()
+    }
+
+    #[test]
+    fn fingertips_between_two_fingers_go_to_the_nearer_finger() {
+        let (positions, indices) = hand_mesh();
+        let (skeleton, world) = hand_skeleton();
+        let weights = compute_geodesic_weights(&skeleton, &world, &positions, &indices).unwrap();
+
+        let mut checked = 0;
+        for (i, position) in positions.iter().enumerate() {
+            if position[1] < 1.79 {
+                continue;
+            }
+            checked += 1;
+            if position[0] < 0.0 {
+                // Left of the gap: the first finger (bones 2 and 3).
+                let own = share_on(&weights[i], &[2, 3]);
+                assert!(own > 0.99, "first-finger vertex {i} has only {own} on its own finger");
+            } else {
+                let own = share_on(&weights[i], &[4, 5]);
+                assert!(own > 0.99, "second-finger vertex {i} has only {own} on its own finger");
+            }
+        }
+        assert_eq!(checked, 8);
+    }
+
+    #[test]
+    fn outer_fingertips_do_not_lean_on_the_neighbouring_finger() {
+    let (positions, indices) = hand_mesh();
+        let (skeleton, world) = hand_skeleton();
+        let weights = compute_geodesic_weights(&skeleton, &world, &positions, &indices).unwrap();
+
+        let mut checked = 0;
+        for (i, position) in positions.iter().enumerate() {
+            if position[1] < 1.79 {
+                continue;
+            }
+            if (position[0] + 0.0185).abs() < 1e-6 {
+                // The outer edge of the first finger: bones 4 and 5 are the other finger's.
+                checked += 1;
+                let leak = share_on(&weights[i], &[4, 5]);
+                assert!(leak < 1e-4, "first fingertip vertex {i} leans {leak} on the other finger");
+            } else if (position[0] - 0.0185).abs() < 1e-6 {
+                checked += 1;
+                let leak = share_on(&weights[i], &[2, 3]);
+                assert!(leak < 1e-4, "second fingertip vertex {i} leans {leak} on the other finger");
+            }
+        }
+        assert_eq!(checked, 4);
+    }
+
+    /// A measurement, not a pass/fail gate: how much each fingertip vertex
+    /// leans on each finger, as the flood fill gives it and after the chain
+    /// restriction. Run on demand:
+    ///   cargo test finger_bleed -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn finger_bleed_measurement() {
+        let (positions, indices) = hand_mesh();
+        let (skeleton, world) = hand_skeleton();
+        let raw = unrestricted_geodesic_weights(&skeleton, &world, &positions, &indices).unwrap();
+        let restricted = compute_geodesic_weights(&skeleton, &world, &positions, &indices).unwrap();
+        for (label, set) in [("raw", &raw), ("restricted", &restricted)] {
+            for (i, position) in positions.iter().enumerate() {
+                if position[1] < 1.79 {
+                    continue;
+                }
+                println!(
+                    "{label:<10} x {:+.4} z {:+.4} | strongest bone {} | on first finger {:.3} | on second finger {:.3}",
+                    position[0],
+                    position[2],
+                    set[i].joint_indices[0],
+                    share_on(&set[i], &[2, 3]),
+                    share_on(&set[i], &[4, 5]),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn each_leg_keeps_to_its_own_bones() {
         let (positions, indices) = two_leg_body();
         let (skeleton, world) = two_leg_skeleton();
         let weights = compute_geodesic_weights(&skeleton, &world, &positions, &indices).unwrap();

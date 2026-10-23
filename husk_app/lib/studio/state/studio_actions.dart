@@ -48,6 +48,12 @@ class StudioActions {
 
   void deleteObjectAt(BuildContext context, int index) =>
       showMessage(context, studio.removeObject(index));
+void setBoneParent(BuildContext context, int child, int parent, int bone) =>
+      showMessage(context, studio.setBoneParent(child, parent, bone));
+
+  void setParent(BuildContext context, int child, int? parent) =>
+      showMessage(context, studio.setParent(child, parent));
+
   void resetPose() => studio.resetPose();
 
   /// Clears the skeleton, weights and keys, after asking.

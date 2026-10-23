@@ -81,14 +81,17 @@ class ViewportController {
   void dragJoint(BigInt joint, double x, double y, {required bool ik}) {
     if (ik) {
       rust.dragLimb(boneIndex: joint, x: x, y: y);
+      rust.refreshModels();
     } else {
       rust.dragBone(boneIndex: joint, x: x, y: y);
+      rust.refreshModels();
     }
   }
 
   /// Moves the whole character so its root follows (x, y).
   void moveCharacter(double x, double y) {
     rust.moveCharacter(x: x, y: y);
+    rust.refreshModels();
   }
 
   /// While looking through the scene camera: where the output frame sits in

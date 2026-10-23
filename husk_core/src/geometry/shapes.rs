@@ -174,6 +174,92 @@ fn push_flat_quad(
     push_flat_triangle(mesh, a, c, d, inside);
 }
 
+/// Adds a flat disc of `radius` at height `y`, facing up (+Y) or down (-Y).
+fn push_disc(mesh: &mut MeshData, radius: f32, y: f32, segments: u32, up: bool) {
+    let normal = if up { [0.0, 1.0, 0.0] } else { [0.0, -1.0, 0.0] };
+    let centre = mesh.positions.len() as u32;
+    mesh.positions.push([0.0, y, 0.0]);
+    mesh.normals.push(normal);
+    for s in 0..=segments {
+        let phi = s as f32 / segments as f32 * TAU;
+        mesh.positions.push([radius * phi.cos(), y, radius * phi.sin()]);
+        mesh.normals.push(normal);
+    }
+    for s in 0..segments {
+        let p0 = centre + 1 + s;
+        let p1 = p0 + 1;
+        if up {
+            mesh.indices.extend_from_slice(&[centre, p1, p0]);
+        } else {
+            mesh.indices.extend_from_slice(&[centre, p0, p1]);
+        }
+    }
+}
+
+/// A flat circle lying in the XZ plane, centred on the origin, facing up
+/// (+Y). `segments` is how many slices it is cut into.
+pub fn circle(radius: f32, segments: u32) -> MeshData {
+    let mut mesh = MeshData::default();
+    push_disc(&mut mesh, radius, 0.0, segments.max(3), true);
+    mesh
+}
+
+/// A cylinder standing along the Y axis, centred on the origin, with flat
+/// caps and a smooth wall. `segments` is how many slices go around the axis.
+pub fn cylinder(radius: f32, height: f32, segments: u32) -> MeshData {
+    let segments = segments.max(3);
+    let half = height * 0.5;
+    let mut mesh = MeshData::default();
+    for s in 0..=segments {
+        let phi = s as f32 / segments as f32 * TAU;
+        let (c, sn) = (phi.cos(), phi.sin());
+        let normal = [c, 0.0, sn];
+        mesh.positions.push([radius * c, -half, radius * sn]);
+        mesh.normals.push(normal);
+        mesh.positions.push([radius * c, half, radius * sn]);
+        mesh.normals.push(normal);
+    }
+    for s in 0..segments {
+        let bottom = 2 * s;
+        let top = bottom + 1;
+        let next_bottom = bottom + 2;
+        let next_top = bottom + 3;
+        mesh.indices
+            .extend_from_slice(&[bottom, top, next_bottom, next_bottom, top, next_top]);
+    }
+    push_disc(&mut mesh, radius, half, segments, true);
+    push_disc(&mut mesh, radius, -half, segments, false);
+    mesh
+}
+
+/// A cone standing along the Y axis, centred on the origin, with its tip
+/// up and a flat base. `segments` is how many slices go around the axis.
+pub fn cone(radius: f32, height: f32, segments: u32) -> MeshData {
+    let segments = segments.max(3);
+    let half = height * 0.5;
+    let mut mesh = MeshData::default();
+    for s in 0..=segments {
+        let phi = s as f32 / segments as f32 * TAU;
+        let (c, sn) = (phi.cos(), phi.sin());
+        // The wall slopes, so its normal tilts upwards by radius / height.
+        let normal = glam::Vec3::new(height * c, radius, height * sn)
+            .normalize()
+            .to_array();
+        mesh.positions.push([radius * c, -half, radius * sn]);
+        mesh.normals.push(normal);
+        mesh.positions.push([0.0, half, 0.0]);
+        mesh.normals.push(normal);
+    }
+    for s in 0..segments {
+        let base = 2 * s;
+        let tip = base + 1;
+        let next_base = base + 2;
+        mesh.indices.extend_from_slice(&[base, tip, next_base]);
+    }
+    push_disc(&mut mesh, radius, -half, segments, false);
+    mesh
+}
+
 /// What a scene camera looks like in the viewport: a boxy body behind and
 /// a pyramid in front, opening away from it. The camera looks along its
 /// own negative Z axis (the pyramid's open end is at z = -0.7) with +Y up,
@@ -285,11 +371,9 @@ pub fn sun_proxy() -> MeshData {
     mesh
 }
 
-/// The built-in shapes, in the order the tray shows them. `by_name`
-/// understands exactly these (any letter case). The tray asks the engine
-/// for this list, so a new shape only has to be added here and in
-/// `by_name`.
-pub const SHAPE_NAMES: [&str; 5] = ["cube", "sphere", "capsule", "torus", "plane"];
+pub const SHAPE_NAMES: [&str; 8] = [
+    "cube", "sphere", "capsule", "torus", "plane", "cylinder", "cone", "circle",
+];
 
 /// Looks up a built-in shape by name (see `SHAPE_NAMES`, any letter
 /// case). Each is about one unit across, except the plane, which is
@@ -301,6 +385,9 @@ pub fn by_name(name: &str) -> Option<MeshData> {
         "capsule" => Some(capsule(0.25, 0.5, 24, 8)),
         "torus" => Some(torus(0.4, 0.1, 32, 16)),
         "plane" => Some(plane(4.0)),
+        "cylinder" => Some(cylinder(0.5, 1.0, 32)),
+        "cone" => Some(cone(0.5, 1.0, 32)),
+        "circle" => Some(circle(2.0, 48)),
         _ => None,
     }
 }
@@ -406,6 +493,38 @@ mod tests {
             .map(|p| p[0].abs())
             .fold(0.0_f32, f32::max);
         assert!((widest_head - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cylinder_cone_and_circle_are_well_formed_and_the_right_size() {
+        let tube = cylinder(0.5, 1.0, 24);
+        assert_well_formed(&tube);
+        assert_outward_winding(&tube);
+        // The wall has two rings of 25 vertices; each cap a centre and a ring of 25.
+        assert_eq!(tube.positions.len(), 2 * 25 + 2 * 26);
+        assert_eq!(tube.indices.len(), 4 * 24 * 3);
+        for axis in 0..3 {
+            assert!((extent(&tube, axis) - 1.0).abs() < 1e-4);
+        }
+
+        let spike = cone(0.5, 1.0, 24);
+        assert_well_formed(&spike);
+        assert_outward_winding(&spike);
+        assert_eq!(spike.indices.len(), 2 * 24 * 3);
+        assert!((extent(&spike, 0) - 1.0).abs() < 1e-4);
+        assert!((extent(&spike, 1) - 1.0).abs() < 1e-4);
+        for p in spike.positions.iter().filter(|p| p[1] > 0.49) {
+            assert!(p[0].abs() < 1e-5 && p[2].abs() < 1e-5, "the tip is one point");
+        }
+
+        let disc = circle(2.0, 32);
+        assert_well_formed(&disc);
+        assert_outward_winding(&disc);
+        assert_eq!(disc.indices.len(), 32 * 3);
+        assert!((extent(&disc, 0) - 4.0).abs() < 1e-4);
+        assert!((extent(&disc, 2) - 4.0).abs() < 1e-4);
+        assert!(extent(&disc, 1).abs() < 1e-6);
+        assert!(disc.normals.iter().all(|n| *n == [0.0, 1.0, 0.0]));
     }
 
     #[test]

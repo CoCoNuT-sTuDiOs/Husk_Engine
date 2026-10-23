@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`
+// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`, `push_scene_models`
 
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
@@ -359,6 +359,41 @@ bool setActiveLight({
   color: color,
   intensity: intensity,
 );
+
+/// Hangs the object at `child` below the object at `parent`, or frees it
+/// (`parent` None). The object stays where it is. False, changing nothing,
+/// for an unknown index or a loop (a parent below its own child).
+bool setObjectParent({required BigInt child, BigInt? parent}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleSetObjectParent(child: child, parent: parent);
+
+/// For each object, in list order, the index of its parent (None at the
+/// top level).
+List<BigInt?> objectParents() =>
+    RustLib.instance.api.crateApiSimpleObjectParents();
+
+/// Makes the object at `child` follow bone `bone` of the object at `parent`
+/// through the pose, staying where it is. False, changing nothing, for an
+/// unknown object, a bone the parent does not have, or a loop.
+bool setObjectBoneParent({
+  required BigInt child,
+  required BigInt parent,
+  required BigInt bone,
+}) => RustLib.instance.api.crateApiSimpleSetObjectBoneParent(
+  child: child,
+  parent: parent,
+  bone: bone,
+);
+
+/// For each object, in list order, the bone of its parent that it follows
+/// (None for an object that does not follow a bone).
+List<BigInt?> objectBoneParents() =>
+    RustLib.instance.api.crateApiSimpleObjectBoneParents();
+
+/// Brings every drawn placement up to date with the scene. Call after
+/// anything that changes a pose, so parts that follow bones follow it.
+void refreshModels() => RustLib.instance.api.crateApiSimpleRefreshModels();
 
 /// The scene's world.
 WorldSettings worldSettings() =>

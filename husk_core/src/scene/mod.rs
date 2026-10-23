@@ -19,6 +19,20 @@ pub enum ObjectKind {
     Camera(camera::Camera),
     Light(light::Light),
 }
+/// How an object hangs below another one: which object is its parent (by
+/// id, since list positions shift when objects are removed) and the
+/// "parent inverse" matrix that keeps the child where it was when it was
+/// parented. The child's world matrix is the parent's world matrix times
+/// `inverse` times the child's own local matrix.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Parenting {
+    pub parent_id: u64,
+pub inverse: glam::Mat4,
+    /// The bone of the parent's skeleton that the child follows through the
+    /// pose, if it follows one.
+    pub bone: Option<usize>,
+}
+
 /// Everything that belongs to one animated thing in a scene.
 #[derive(Default)]
 pub struct Object {
@@ -38,6 +52,13 @@ pub struct Object {
     /// The object's animation of everything except its bones: placement,
     /// look, lens and light.
     pub channels: Channels,
+    /// A number that names this object for good (0 means it has none yet).
+    /// Parent links use it, because list positions shift when an object is
+    /// removed.
+    pub id: u64,
+    /// The object this one hangs below, if any. `transform` is then
+    /// relative to the parent.
+    pub parent: Option<Parenting>,
 }
 
 impl Object {
@@ -204,6 +225,8 @@ pub struct Scene {
     pub output: output::Output,
     /// The space around the objects: background and studio light.
     pub world: world::World,
+    /// The id the next object that needs one gets.
+    pub next_id: u64,
 }
 
 impl Scene {
@@ -214,6 +237,19 @@ impl Scene {
     pub fn remove_object(&mut self, index: usize) -> bool {
         if index == 0 || index >= self.objects.len() {
             return false;
+        }
+        // The object's children stay where they are and move up to its parent.
+        let removed_id = self.objects[index].id;
+        if removed_id != 0 {
+            let grandparent = self.parent_of(index);
+            let children: Vec<usize> = (0..self.objects.len())
+                .filter(|&i| {
+                    self.objects[i].parent.map(|link| link.parent_id) == Some(removed_id)
+                })
+                .collect();
+            for child in children {
+                self.set_parent(child, grandparent);
+            }
         }
         self.objects.remove(index);
         self.active_object = active_after_removal(self.active_object, index);
@@ -279,8 +315,9 @@ impl Scene {
     pub fn lights(&self) -> Vec<(transform::Transform, light::Light)> {
         self.objects
             .iter()
-            .filter_map(|object| match object.kind {
-                ObjectKind::Light(light) => Some((object.transform, light)),
+            .enumerate()
+            .filter_map(|(index, object)| match object.kind {
+            ObjectKind::Light(light) => Some((self.world_transform(index), light)),
                 _ => None,
             })
             .take(light::MAX_LIGHTS)
@@ -292,8 +329,20 @@ impl Scene {
     /// lens and light from the channels. Objects without keys are left as
     /// they are. Returns what the renderer needs for each object, in list
     /// order.
-    pub fn evaluate_at(&mut self, time: f32) -> Vec<ObjectFrame> {
-        self.objects
+pub fn evaluate_at(&mut self, time: f32) -> Vec<ObjectFrame> {
+        let mut frames = self.evaluate_objects_at(time);
+        // Each object's own placement is relative to its parent, so the
+        // drawn placement comes from the whole chain.
+        for frame in frames.iter_mut() {
+            frame.model = self.world_matrix(frame.index);
+        }
+        frames
+    }
+
+    /// Evaluates every object on its own. The model matrix in each frame is
+    /// the object's own placement, before its parents are applied.
+    fn evaluate_objects_at(&mut self, time: f32) -> Vec<ObjectFrame> {
+    self.objects
             .iter_mut()
             .enumerate()
             .map(|(index, object)| {
@@ -321,6 +370,163 @@ impl Scene {
                 }
             })
             .collect()
+    }
+
+    /// How far a bone of the object at `object` has moved from its rest
+    /// position in the current pose, in that object's own space. The
+    /// identity for an unknown object or bone.
+    pub fn bone_matrix(&self, object: usize, bone: usize) -> glam::Mat4 {
+        let Some(object) = self.objects.get(object) else {
+            return glam::Mat4::IDENTITY;
+        };
+        if bone >= object.skeleton.bones.len() {
+            return glam::Mat4::IDENTITY;
+        }
+        let posed = object.pose.posed_world_matrices(&object.skeleton);
+        let rest = object.skeleton.world_bind_matrices();
+        posed[bone] * rest[bone].inverse()
+    }
+
+    /// The id of the object at `index`, giving it one if it has none yet.
+    fn id_of(&mut self, index: usize) -> u64 {
+        if self.objects[index].id == 0 {
+            self.next_id += 1;
+            self.objects[index].id = self.next_id;
+        }
+        self.objects[index].id
+    }
+
+    /// The index of the object with `id` (an id of 0 means none).
+    pub fn index_of_id(&self, id: u64) -> Option<usize> {
+        if id == 0 {
+            return None;
+        }
+        self.objects.iter().position(|object| object.id == id)
+    }
+
+    /// The index of the parent of the object at `index`, if it has one.
+    pub fn parent_of(&self, index: usize) -> Option<usize> {
+        let link = self.objects.get(index)?.parent?;
+        self.index_of_id(link.parent_id)
+    }
+
+    /// Where the object at `index` is in the scene, parents included: its
+    /// own placement, then each parent's, up the chain.
+    pub fn world_matrix(&self, index: usize) -> glam::Mat4 {
+        let Some(object) = self.objects.get(index) else {
+            return glam::Mat4::IDENTITY;
+        };
+        let mut matrix = object.transform.to_matrix();
+        let mut current = index;
+        for _ in 0..self.objects.len() {
+            let (Some(parent_index), Some(link)) =
+                (self.parent_of(current), self.objects[current].parent)
+            else {
+                break;
+            };
+let bone = match link.bone {
+                Some(bone) => self.bone_matrix(parent_index, bone),
+                None => glam::Mat4::IDENTITY,
+            };
+            matrix = self.objects[parent_index].transform.to_matrix() * bone * link.inverse * matrix;
+            current = parent_index;
+        }
+        matrix
+    }
+
+    /// The object's world placement as a position, rotation and scale. An
+    /// object with no parent gives its own transform exactly; with
+    /// parents, any shear is dropped.
+    pub fn world_transform(&self, index: usize) -> transform::Transform {
+        match self.objects.get(index) {
+            Some(object) if self.parent_of(index).is_none() => object.transform,
+            Some(_) => transform::Transform::from_matrix(self.world_matrix(index)),
+            None => transform::Transform::default(),
+        }
+    }
+
+    /// Places the object at `index` at `world` in the scene, working out
+    /// the local placement that gives it. False for an unknown index.
+    pub fn set_world_transform(&mut self, index: usize, world: transform::Transform) -> bool {
+        if index >= self.objects.len() {
+            return false;
+        }
+        let (Some(parent_index), Some(link)) = (self.parent_of(index), self.objects[index].parent)
+        else {
+            return self.set_transform(index, world);
+        };
+        let parent_world = self.world_matrix(parent_index);
+let bone = match link.bone {
+            Some(bone) => self.bone_matrix(parent_index, bone),
+            None => glam::Mat4::IDENTITY,
+        };
+        let local = (parent_world * bone * link.inverse).inverse() * world.to_matrix();
+        self.objects[index].transform = transform::Transform::from_matrix(local);
+        true
+    }
+
+    /// Hangs the object at `child` below the object at `parent`, or frees
+    /// it (`parent` None). Either way the object stays where it is in the
+    /// scene. False, changing nothing, for an unknown index, an object
+    /// below itself, or a parent that is itself below `child`.
+pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
+        self.link(child, parent, None)
+    }
+
+    /// Makes the object at `child` follow one bone of the object at
+    /// `parent` through its pose, staying where it is. False, changing
+    /// nothing, for an unknown object, a parent with no such bone, or a loop.
+    pub fn set_parent_to_bone(&mut self, child: usize, parent: usize, bone: usize) -> bool {
+        match self.objects.get(parent) {
+            Some(object) if bone < object.skeleton.bones.len() => {
+                self.link(child, Some(parent), Some(bone))
+            }
+            _ => false,
+        }
+    }
+
+    fn link(&mut self, child: usize, parent: Option<usize>, bone: Option<usize>) -> bool {
+    if child >= self.objects.len() {
+            return false;
+        }
+        let world = self.world_matrix(child);
+        match parent {
+            None => {
+                if self.objects[child].parent.is_some() {
+                    self.objects[child].parent = None;
+                    self.objects[child].transform = transform::Transform::from_matrix(world);
+                }
+                true
+            }
+            Some(parent) => {
+                if parent >= self.objects.len() || parent == child {
+                    return false;
+                }
+                // Walking up from the new parent must never meet the child.
+                let mut above = Some(parent);
+                for _ in 0..=self.objects.len() {
+                    match above {
+                        Some(i) if i == child => return false,
+                        Some(i) => above = self.parent_of(i),
+                        None => break,
+                    }
+                }
+                let parent_id = self.id_of(parent);
+                let local = self.objects[child].transform.to_matrix();
+                let bone_matrix = match bone {
+                    Some(bone) => self.bone_matrix(parent, bone),
+                    None => glam::Mat4::IDENTITY,
+                };
+                let inverse =
+                    (self.world_matrix(parent) * bone_matrix).inverse() * world * local.inverse();
+                    self.objects[child].parent = Some(Parenting {
+                    parent_id,
+                    bone,
+                    inverse,
+                });
+                    true
+            }
+        }
     }
 
     /// The index of the scene camera: the first camera in the list, which
@@ -459,8 +665,10 @@ pub fn active_transform() -> (usize, transform::Transform) {
             let transform = scene
                 .objects
                 .get(scene.active_object)
-                .map_or_else(transform::Transform::default, |object| object.transform);
-            (scene.active_object, transform)
+                .map_or_else(transform::Transform::default, |_| {
+                    scene.world_transform(scene.active_object)
+                });
+                (scene.active_object, transform)
         }
         None => (0, transform::Transform::default()),
     }
@@ -473,8 +681,8 @@ pub fn set_active_transform(transform: transform::Transform) -> Option<usize> {
     let scene_index = guard.active_scene;
     let scene = guard.scenes.get_mut(scene_index)?;
     let index = scene.active_object;
-    if scene.set_transform(index, transform) {
-        Some(index)
+    if scene.set_world_transform(index, transform) {
+    Some(index)
     } else {
         None
     }
@@ -539,7 +747,9 @@ pub fn scene_camera() -> Option<(transform::Transform, camera::Camera)> {
     let scene = guard.scenes.get(guard.active_scene)?;
     let object = scene.objects.get(scene.first_camera()?)?;
     match object.kind {
-        ObjectKind::Camera(lens) => Some((object.transform, lens)),
+    ObjectKind::Camera(lens) => {
+            Some((scene.world_transform(scene.first_camera()?), lens))
+        }
         ObjectKind::Mesh | ObjectKind::Light(_) => None,
     }
 }
@@ -575,6 +785,62 @@ pub fn scene_lights() -> Vec<(transform::Transform, light::Light)> {
         .scenes
         .get(guard.active_scene)
         .map_or_else(Vec::new, |scene| scene.lights())
+}
+
+/// Every object's world placement, in list order (parents included).
+pub fn world_matrices() -> Vec<glam::Mat4> {
+    let guard = PROJECT.lock().unwrap();
+    match guard.scenes.get(guard.active_scene) {
+        Some(scene) => (0..scene.objects.len())
+            .map(|index| scene.world_matrix(index))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Hangs one object below another, or frees it (see `Scene::set_parent`).
+pub fn set_parent(child: usize, parent: Option<usize>) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => scene.set_parent(child, parent),
+        None => false,
+    }
+}
+
+/// Makes one object follow a bone of another (see `Scene::set_parent_to_bone`).
+pub fn set_parent_to_bone(child: usize, parent: usize, bone: usize) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => scene.set_parent_to_bone(child, parent, bone),
+        None => false,
+    }
+}
+
+/// For each object, in list order, the bone of its parent that it follows,
+/// if any.
+pub fn object_bone_parents() -> Vec<Option<usize>> {
+    let guard = PROJECT.lock().unwrap();
+    match guard.scenes.get(guard.active_scene) {
+        Some(scene) => scene
+            .objects
+            .iter()
+            .map(|object| object.parent.and_then(|link| link.bone))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// For each object, in list order, the index of its parent.
+pub fn object_parents() -> Vec<Option<usize>> {
+    let guard = PROJECT.lock().unwrap();
+    match guard.scenes.get(guard.active_scene) {
+        Some(scene) => (0..scene.objects.len())
+            .map(|index| scene.parent_of(index))
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 /// Evaluates the active scene's animation at `time` (see
@@ -930,6 +1196,195 @@ let mut scene = Scene::default();
         assert!(x_at(object, 2.0).abs() < 1e-4);
         assert!((x_at(object, 2.5) - 2.0).abs() < 1e-4);
         assert!((x_at(object, 3.0) - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn parenting_keeps_the_child_where_it_is_and_then_it_follows() {
+        let mut scene = scene_with(2, 0);
+        scene.objects[0].transform.translation = glam::Vec3::new(2.0, 0.0, 0.0);
+        scene.objects[0].transform.rotation = glam::Quat::from_rotation_z(90f32.to_radians());
+        scene.objects[1].transform.translation = glam::Vec3::new(1.0, 5.0, 0.0);
+        let before = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+
+        assert!(scene.set_parent(1, Some(0)));
+        assert_eq!(scene.parent_of(1), Some(0));
+        let after = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((after - before).length() < 1e-4);
+
+        // Move the parent: the child goes with it.
+        scene.objects[0].transform.translation = glam::Vec3::new(2.0, 3.0, 0.0);
+        let moved = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((moved - (before + glam::Vec3::new(0.0, 3.0, 0.0))).length() < 1e-4);
+    }
+
+    #[test]
+    fn turning_the_parent_swings_the_child_around_it() {
+        let mut scene = scene_with(2, 0);
+        scene.objects[1].transform.translation = glam::Vec3::new(1.0, 0.0, 0.0);
+        assert!(scene.set_parent(1, Some(0)));
+        scene.objects[0].transform.rotation = glam::Quat::from_rotation_z(90f32.to_radians());
+        let at = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((at - glam::Vec3::new(0.0, 1.0, 0.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn clearing_the_parent_keeps_the_world_placement() {
+        let mut scene = scene_with(2, 0);
+        scene.objects[1].transform.translation = glam::Vec3::new(1.0, 0.0, 0.0);
+        assert!(scene.set_parent(1, Some(0)));
+        scene.objects[0].transform.translation = glam::Vec3::new(0.0, 3.0, 0.0);
+        let before = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+
+        assert!(scene.set_parent(1, None));
+        assert_eq!(scene.parent_of(1), None);
+        let after = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((after - before).length() < 1e-4);
+        assert!((scene.objects[1].transform.translation - before).length() < 1e-4);
+    }
+
+    #[test]
+    fn a_parent_cannot_hang_below_its_own_child_and_bad_indices_are_refused() {
+        let mut scene = scene_with(3, 0);
+        assert!(scene.set_parent(1, Some(0)));
+        assert!(scene.set_parent(2, Some(1)));
+        // 0 <- 1 <- 2: putting 0 below 2 or below 1 would close a loop.
+        assert!(!scene.set_parent(0, Some(2)));
+        assert!(!scene.set_parent(0, Some(1)));
+        assert!(!scene.set_parent(1, Some(1)));
+        assert!(!scene.set_parent(9, Some(0)));
+        assert!(!scene.set_parent(1, Some(9)));
+        assert_eq!(scene.parent_of(0), None);
+    }
+
+    #[test]
+    fn removing_a_parent_hands_its_children_to_its_own_parent_in_place() {
+        // 0 grandparent, 1 parent, 2 child, 3 bystander.
+        let mut scene = scene_with(4, 0);
+        scene.objects[1].transform.translation = glam::Vec3::new(1.0, 0.0, 0.0);
+        scene.objects[2].transform.translation = glam::Vec3::new(0.0, 2.0, 0.0);
+        assert!(scene.set_parent(1, Some(0)));
+        assert!(scene.set_parent(2, Some(1)));
+        let before = scene.world_matrix(2).transform_point3(glam::Vec3::ZERO);
+
+        assert!(scene.remove_object(1));
+        // The child is now index 1 and hangs below the grandparent, in place.
+        assert_eq!(scene.objects.len(), 3);
+        assert_eq!(scene.parent_of(1), Some(0));
+        let after = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((after - before).length() < 1e-4);
+    }
+
+    #[test]
+    fn parent_links_survive_other_objects_being_removed() {
+        // 0 the model, 1 a bystander, 2 the parent, 3 the child.
+        let mut scene = scene_with(4, 0);
+        scene.objects[2].transform.translation = glam::Vec3::new(5.0, 0.0, 0.0);
+        assert!(scene.set_parent(3, Some(2)));
+        assert!(scene.remove_object(1));
+        // The parent is now index 1 and the child index 2, still linked.
+        assert_eq!(scene.parent_of(2), Some(1));
+        // The child stayed at the origin when parented; moving the parent
+        // two units further moves it two units.
+        scene.objects[1].transform.translation = glam::Vec3::new(7.0, 0.0, 0.0);
+        let at = scene.world_matrix(2).transform_point3(glam::Vec3::ZERO);
+        assert!((at - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn setting_a_childs_world_placement_works_out_its_local_one() {
+        let mut scene = scene_with(2, 0);
+        scene.objects[0].transform.translation = glam::Vec3::new(1.0, 0.0, 0.0);
+        scene.objects[0].transform.rotation = glam::Quat::from_rotation_y(30f32.to_radians());
+        assert!(scene.set_parent(1, Some(0)));
+
+        let mut wanted = transform::Transform::default();
+        wanted.translation = glam::Vec3::new(3.0, 2.0, -1.0);
+        wanted.set_euler_degrees(glam::Vec3::new(10.0, 20.0, 30.0));
+        assert!(scene.set_world_transform(1, wanted));
+        let got = scene.world_transform(1);
+        assert!((got.translation - wanted.translation).length() < 1e-3);
+        let probe = glam::Vec3::new(0.3, 0.8, -0.5);
+        assert!((got.rotation * probe - wanted.rotation * probe).length() < 1e-3);
+
+        // An object with no parent takes the placement exactly as given.
+        assert!(scene.set_world_transform(0, wanted));
+        assert_eq!(scene.objects[0].transform, wanted);
+    }
+
+    #[test]
+    fn a_child_follows_its_parent_through_the_animation() {
+        let mut scene = scene_with(2, 0);
+        assert!(scene.set_parent(1, Some(0)));
+        scene.objects[0].key_channels(0.0);
+        scene.objects[0].transform.translation = glam::Vec3::new(4.0, 0.0, 0.0);
+        scene.objects[0].key_channels(2.0);
+
+        let frames = scene.evaluate_at(1.0);
+        // The parent is halfway along; the child has no keys but goes with it.
+        let child_at = frames[1].model.transform_point3(glam::Vec3::ZERO);
+        assert!((child_at - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+        assert!(!frames[1].placed);
+    }
+
+    #[test]
+    fn a_part_parented_to_a_bone_swings_with_that_bone() {
+        let mut scene = scene_with_an_arm();
+        scene.objects[1].transform.translation = glam::Vec3::new(2.0, 0.0, 0.0);
+        assert!(scene.set_parent_to_bone(1, 0, 1));
+        // At rest nothing moves.
+        let rest = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((rest - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+
+        // Turn the arm a quarter turn about its own joint, at (1, 0, 0): the
+        // part, one unit further out, swings up to (1, 1, 0).
+        scene.objects[0].pose.rotations = vec![
+            glam::Quat::IDENTITY,
+            glam::Quat::from_rotation_z(90f32.to_radians()),
+        ];
+        let swung = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((swung - glam::Vec3::new(1.0, 1.0, 0.0)).length() < 1e-4);
+    }
+
+    /// Object 0 has a two-bone arm (a root at the origin and an "arm" joint
+    /// one unit along +X); object 1 is a bare part.
+    fn scene_with_an_arm() -> Scene {
+        let mut scene = scene_with(2, 0);
+        let root = scene.objects[0]
+            .skeleton
+            .add_bone("root", None, glam::Vec3::ZERO);
+        scene.objects[0]
+            .skeleton
+            .add_bone("arm", Some(root), glam::Vec3::new(1.0, 0.0, 0.0));
+        scene
+    }
+
+    #[test]
+    fn parenting_to_a_bone_while_posed_keeps_the_part_in_place() {
+        let mut scene = scene_with_an_arm();
+        let quarter = glam::Quat::from_rotation_z(90f32.to_radians());
+        scene.objects[0].pose.rotations = vec![glam::Quat::IDENTITY, quarter];
+        scene.objects[1].transform.translation = glam::Vec3::new(1.0, 1.0, 0.0);
+        let before = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+
+        assert!(scene.set_parent_to_bone(1, 0, 1));
+        let after = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((after - before).length() < 1e-4);
+
+        // Back to rest: the part goes back with the arm, to where it hung
+        // when the arm was straight.
+        scene.objects[0].pose.rotations = vec![glam::Quat::IDENTITY, glam::Quat::IDENTITY];
+        let rest = scene.world_matrix(1).transform_point3(glam::Vec3::ZERO);
+        assert!((rest - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn a_bone_parent_must_be_a_real_bone_of_a_real_object() {
+        let mut scene = scene_with_an_arm();
+        assert!(!scene.set_parent_to_bone(1, 0, 2)); // no such bone
+        assert!(!scene.set_parent_to_bone(0, 1, 0)); // object 1 has no skeleton
+        assert!(!scene.set_parent_to_bone(1, 5, 0)); // no such parent
+        assert!(!scene.set_parent_to_bone(5, 0, 0)); // no such child
+        assert_eq!(scene.parent_of(1), None);
     }
 
     #[test]
