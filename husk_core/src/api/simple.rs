@@ -609,8 +609,11 @@ pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
 /// the pixel shows no object (the active object stays as it was).
 #[flutter_rust_bridge::frb(sync)]
 pub fn select_object_at(x: f64, y: f64) -> Option<usize> {
+    // Locked objects cannot be clicked: the click goes through to what is
+    // behind them. The scene is the source of truth, so it is asked first.
+    let locks = crate::scene::object_locks();
     let index = crate::platform::ffi::with_active_renderer(|renderer| {
-        renderer.pick_object(x as f32, y as f32)
+        renderer.pick_object_except(x as f32, y as f32, &locks)
     })
     .flatten()?;
     // The scene checks the index first, so a mismatch changes neither list.
@@ -655,6 +658,39 @@ pub fn select_object(index: usize) -> bool {
     }
     crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_active_object(index));
     true
+}
+
+/// Locks or unlocks the object at `index`. A locked object cannot be
+/// clicked in the viewport, moved, rotated, scaled or deleted; it still
+/// draws and plays its animation. False, changing nothing, for an unknown
+/// index.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_object_locked(index: usize, locked: bool) -> bool {
+    crate::scene::set_object_locked(index, locked)
+}
+
+/// Locks every object except the active one.
+#[flutter_rust_bridge::frb(sync)]
+pub fn lock_all_except_active() {
+    crate::scene::lock_all_except_active();
+}
+
+/// Unlocks every object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn unlock_all_objects() {
+    crate::scene::unlock_all();
+}
+
+/// For each object, in list order, whether it is locked.
+#[flutter_rust_bridge::frb(sync)]
+pub fn object_locks() -> Vec<bool> {
+    crate::scene::object_locks()
+}
+
+/// Whether the active object is locked.
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_object_locked() -> bool {
+    crate::scene::active_locked()
 }
 
 /// The names of the built-in shapes, in the order the tray shows them.
@@ -1136,6 +1172,10 @@ pub struct WorldSettings {
     pub background: (f32, f32, f32),
     pub ambient: f32,
     pub reflections: f32,
+    /// The colour at the top of the background when the gradient is on; the
+    /// background colour is then the one at the bottom.
+    pub background_top: (f32, f32, f32),
+    pub gradient: bool,
 }
 
 /// The scene's world.
@@ -1146,6 +1186,12 @@ pub fn world_settings() -> WorldSettings {
         background: (world.background[0], world.background[1], world.background[2]),
         ambient: world.ambient,
         reflections: world.reflections,
+        background_top: (
+            world.background_top[0],
+            world.background_top[1],
+            world.background_top[2],
+        ),
+        gradient: world.gradient,
     }
 }
 
@@ -1164,10 +1210,16 @@ pub fn set_world_settings(settings: WorldSettings) -> bool {
     if !values.iter().all(|value| value.is_finite()) {
         return false;
     }
+    let top = settings.background_top;
+    if !(top.0.is_finite() && top.1.is_finite() && top.2.is_finite()) {
+        return false;
+    }
     let world = crate::scene::world::World {
-        background: [settings.background.0, settings.background.1, settings.background.2],
+    background: [settings.background.0, settings.background.1, settings.background.2],
         ambient: settings.ambient,
         reflections: settings.reflections,
+        background_top: [top.0, top.1, top.2],
+        gradient: settings.gradient,
     }
     .clamped();
     crate::scene::set_world(world);

@@ -644,6 +644,21 @@ mod tests {
     }
 
     #[test]
+    fn pick_nearest_goes_through_a_mesh_with_nothing_in_it() {
+        // A locked object is passed in with an empty mesh: the ray goes
+        // through it and picks what is behind.
+        let (positions, indices) = one_quad();
+        let in_front = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 2.0));
+        let no_positions: &[[f32; 3]] = &[];
+        let no_indices: &[u32] = &[];
+        let placed = [
+            (in_front, no_positions, no_indices),
+            (glam::Mat4::IDENTITY, positions.as_slice(), indices.as_slice()),
+        ];
+        assert_eq!(pick_nearest(&ray_down_z(), &placed), Some(1));
+    }
+
+    #[test]
     fn midpoint_lands_between_front_and_back_surface() {
     let (positions, indices) = two_parallel_quads();
         let mid = ray_mesh_midpoint(&ray_down_z(), &positions, &indices).unwrap();

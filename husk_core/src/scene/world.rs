@@ -11,6 +11,13 @@ pub struct World {
     /// How strong the studio reflections are. 1 is the usual look, 0
     /// switches them off.
     pub reflections: f32,
+    /// The colour at the top of the background when `gradient` is on (red,
+    /// green and blue, each from 0 to 1). `background` is then the colour
+    /// at the bottom.
+    pub background_top: [f32; 3],
+    /// Whether the background fades from `background_top` at the top to
+    /// `background` at the bottom, instead of being one plain colour.
+    pub gradient: bool,
 }
 
 impl World {
@@ -23,6 +30,8 @@ impl World {
             background: self.background.map(|c| c.clamp(0.0, 1.0)),
             ambient: self.ambient.clamp(0.0, Self::MAX_STRENGTH),
             reflections: self.reflections.clamp(0.0, Self::MAX_STRENGTH),
+            background_top: self.background_top.map(|c| c.clamp(0.0, 1.0)),
+            gradient: self.gradient,
         }
     }
 
@@ -42,6 +51,8 @@ impl Default for World {
             background: [0.05, 0.05, 0.08],
             ambient: 1.0,
             reflections: 1.0,
+            background_top: [0.35, 0.50, 0.75],
+            gradient: false,
         }
     }
 }
@@ -54,6 +65,8 @@ mod tests {
     fn the_default_is_the_look_the_renderer_always_had() {
         let world = World::default();
         assert_eq!(world.background, [0.05, 0.05, 0.08]);
+        assert!(!world.gradient);
+        assert_eq!(world.background_top, [0.35, 0.50, 0.75]);
         assert_eq!(world.shader_values(), [1.0, 1.0, 0.0, 0.0]);
         assert_eq!(world.clamped(), world);
     }
@@ -64,11 +77,15 @@ mod tests {
             background: [-1.0, 0.5, 4.0],
             ambient: 9.0,
             reflections: -3.0,
+            background_top: [2.0, -1.0, 0.25],
+            gradient: true,
         };
         let held = wild.clamped();
         assert_eq!(held.background, [0.0, 0.5, 1.0]);
         assert_eq!(held.ambient, World::MAX_STRENGTH);
         assert_eq!(held.reflections, 0.0);
+        assert_eq!(held.background_top, [1.0, 0.0, 0.25]);
+        assert!(held.gradient);
     }
 
     #[test]
@@ -77,6 +94,8 @@ mod tests {
             background: [0.0, 0.0, 0.0],
             ambient: 0.25,
             reflections: 1.5,
+            background_top: [0.0, 0.0, 0.0],
+            gradient: false,
         };
         assert_eq!(world.shader_values(), [0.25, 1.5, 0.0, 0.0]);
     }

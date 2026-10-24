@@ -1,8 +1,6 @@
 /// Two keys closer together than this (in seconds) count as the same key.
 const KEY_MERGE_SECONDS: f32 = 0.005;
 
-/// A repeat cycle has to run at least this much (seconds) past the last
-/// key, so the last key has somewhere to blend back to the first.
 const MIN_CYCLE_GAP: f32 = 0.01;
 /// One snapshot of the pose: every joint's rotation at a moment in time.
 #[derive(Debug, Clone)]
@@ -32,9 +30,6 @@ impl Timeline {
             .filter(|period| *period > last.time - first.time + MIN_CYCLE_GAP)
     }
 
-    /// Makes the keys repeat: a cycle runs from the first key until
-    /// `end_time`, then starts over. `end_time` has to be past the last
-    /// key. Returns whether the repeat was set.
     pub fn set_cycle_end(&mut self, end_time: f32) -> bool {
         let (Some(first), Some(last)) = (self.keys.first(), self.keys.last()) else {
             return false;
@@ -78,6 +73,38 @@ impl Timeline {
            self.keys.insert(index, Keyframe { time, rotations, offset });
     }
 
+    /// The key at position `index` as the keys would continue if they kept
+    /// repeating every `period` seconds: its time, the key itself, and how
+    /// many cycles it is from the real keys (negative before the first one).
+    /// Without a repeat only the real keys exist, and anything else is None.
+    fn key_at(&self, index: isize, period: Option<f32>) -> Option<(f32, &Keyframe, i32)> {
+        let count = self.keys.len() as isize;
+        if count == 0 {
+            return None;
+        }
+        if (0..count).contains(&index) {
+            let key = &self.keys[index as usize];
+            return Some((key.time, key, 0));
+        }
+        let period = period?;
+        let cycles = index.div_euclid(count);
+        let key = &self.keys[index.rem_euclid(count) as usize];
+        Some((key.time + cycles as f32 * period, key, cycles as i32))
+    }
+
+    /// The index of the key that starts the segment `time` falls in, where
+    /// `time` is already inside the first cycle and past the first key. After
+    /// the last key a repeat carries on to the first key of the next cycle,
+    /// so the segment starts at the last key. None when there is no repeat
+    /// and `time` is on or past the last key: the pose just holds.
+    fn segment_start(&self, time: f32, period: Option<f32>) -> Option<isize> {
+        let last = self.keys.last()?;
+        if time >= last.time {
+            return period.map(|_| self.keys.len() as isize - 1);
+        }
+        Some(self.keys.iter().position(|key| key.time > time)? as isize - 1)
+    }
+
     pub fn sample_offset(&self, time: f32) -> Option<glam::Vec3> {
         let first = self.keys.first()?;
         let last = self.keys.last()?;
@@ -101,24 +128,30 @@ impl Timeline {
             None => (time, 0.0),
         };
 
-        let within_the_cycle = if time >= last.time {
-            match period {
-                // Heading from the last key to where the first key will be
-                // one step further on.
-                Some(p) => {
-                    let t = (time - last.time) / (first.time + p - last.time);
-                    last.offset.lerp(first.offset + step, t)
-                }
-                None => last.offset,
+        let within_the_cycle = match self.segment_start(time, period) {
+            None => last.offset,
+            Some(start) => {
+                // Each key's offset, carried on by one step for every cycle
+                // it is away from the real keys.
+                let at = |index: isize| {
+                    self.key_at(index, period).map(|(t, key, cycles)| {
+                        (t, (key.offset + step * cycles as f32).to_array())
+                    })
+                };
+                let (a_time, a) = at(start)?;
+                let (b_time, b) = at(start + 1)?;
+                glam::Vec3::from(crate::animation::curve::smooth_between::<3>(
+                    at(start - 1),
+                    (a_time, a),
+                    (b_time, b),
+                    at(start + 2),
+                    time,
+                ))
             }
-        } else {
-            let next_index = self.keys.iter().position(|key| key.time > time)?;
-            let a = &self.keys[next_index - 1];
-            let b = &self.keys[next_index];
-            a.offset.lerp(b.offset, (time - a.time) / (b.time - a.time))
         };
         Some(within_the_cycle + step * repeats + self.travel_velocity * elapsed_total)
     }
+
 
     /// Deletes the key closest to `time`, if one is within `tolerance`
     /// seconds of it. Returns whether a key was removed.
@@ -139,15 +172,8 @@ impl Timeline {
         }
     }
 
-    /// The pose at `time` (seconds) for a skeleton with `joint_count`
-    /// joints: before the first key and after the last the pose holds;
-    /// between two keys each joint turns the short way round, in a
-    /// straight line from one key's rotation to the other's. A joint a
-    /// key doesn't know about (it was added later) is left at rest.
-    /// Returns None if there are no keys.
     pub fn sample(&self, time: f32, joint_count: usize) -> Option<Vec<glam::Quat>> {
         let first = self.keys.first()?;
-        let last = self.keys.last()?;
         let pick = |key: &Keyframe, joint: usize| -> glam::Quat {
             key.rotations
                 .get(joint)
@@ -164,31 +190,34 @@ impl Timeline {
             Some(p) => first.time + (time - first.time) % p,
             None => time,
         };
+        // Past the last key, without a repeat, the pose holds.
+        let Some(start) = self.segment_start(time, period) else {
+            let last = self.keys.last()?;
+            return Some((0..joint_count).map(|j| pick(last, j)).collect());
+        };
 
-        if time >= last.time {
-            return Some(match period {
-                // The gap at the end of a cycle: blend from the last key back
-                // around to the first.
-                Some(p) => {
-                    let t = (time - last.time) / (first.time + p - last.time);
-                    (0..joint_count)
-                        .map(|j| pick(last, j).slerp(pick(first, j), t))
-                        .collect()
-                }
-                None => (0..joint_count).map(|j| pick(last, j)).collect(),
-            });
-        }
-        // The two keys on either side of `time`.
-        let next_index = self.keys.iter().position(|key| key.time > time)?;
-        let a = &self.keys[next_index - 1];
-        let b = &self.keys[next_index];
-        let t = (time - a.time) / (b.time - a.time);
+        // The segment runs from key `start` to the key after it (for the
+        // last key of a repeat, the first key of the next cycle). The keys
+        // either side of the segment shape the curve at its two ends.
+        let (a_time, a, _) = self.key_at(start, period)?;
+        let (b_time, b, _) = self.key_at(start + 1, period)?;
+        let before = self.key_at(start - 1, period);
+        let after = self.key_at(start + 2, period);
         Some(
             (0..joint_count)
-                .map(|j| pick(a, j).slerp(pick(b, j), t))
+                .map(|j| {
+                    crate::animation::curve::smooth_rotation(
+                        before.map(|(t, key, _)| (t, pick(key, j))),
+                        (a_time, pick(a, j)),
+                        (b_time, pick(b, j)),
+                        after.map(|(t, key, _)| (t, pick(key, j))),
+                        time,
+                    )
+                })
                 .collect(),
         )
     }
+
 }
 
 #[cfg(test)]
@@ -211,7 +240,9 @@ mod tests {
         timeline.set_key(0.0, vec![z(0.0)]);
         timeline.set_key(2.0, vec![z(90.0)]);
         assert!(same(timeline.sample(1.0, 1).unwrap()[0], z(45.0)));
-        assert!(same(timeline.sample(0.5, 1).unwrap()[0], z(22.5)));
+        // The curve eases out of the first key, so a quarter of the way in
+        // time it has turned less than a quarter of the way.
+        assert!(timeline.sample(0.5, 1).unwrap()[0].z < z(22.5).z);
     }
 
     #[test]
@@ -363,7 +394,8 @@ mod offset_tests {
         timeline.set_key_with_offset(0.0, vec![Quat::IDENTITY], Vec3::ZERO);
         timeline.set_key_with_offset(2.0, vec![Quat::IDENTITY], Vec3::new(4.0, 0.0, 0.0));
         assert!(near(timeline.sample_offset(1.0).unwrap(), Vec3::new(2.0, 0.0, 0.0)));
-        assert!(near(timeline.sample_offset(0.5).unwrap(), Vec3::new(1.0, 0.0, 0.0)));
+        // Eased: a quarter of the way in time is 0.15625 of the way (not 0.25).
+        assert!(near(timeline.sample_offset(0.5).unwrap(), Vec3::new(0.625, 0.0, 0.0)));
         assert!(near(timeline.sample_offset(9.0).unwrap(), Vec3::new(4.0, 0.0, 0.0)));
         assert!(Timeline::default().sample_offset(1.0).is_none());
     }
@@ -443,5 +475,53 @@ mod travel_tests {
                 Vec3::new(time, 0.0, 0.0)
             ));
         }
+    }
+}
+
+
+#[cfg(test)]
+mod smooth_tests {
+    use super::*;
+    use glam::Quat;
+
+    fn z(degrees: f32) -> Quat {
+        Quat::from_rotation_z(degrees.to_radians())
+    }
+
+    /// How far a rotation about Z has turned, in degrees.
+    fn turned(q: Quat) -> f32 {
+        (2.0 * q.z.atan2(q.w)).to_degrees()
+    }
+
+    #[test]
+    fn a_pose_eases_out_of_its_first_key_and_into_its_last() {
+        let mut timeline = Timeline::default();
+        timeline.set_key(0.0, vec![z(0.0)]);
+        timeline.set_key(2.0, vec![z(90.0)]);
+        let early = turned(timeline.sample(0.5, 1).unwrap()[0]);
+        let late = turned(timeline.sample(1.5, 1).unwrap()[0]);
+        // A straight line would be at 22.5 and 67.5 degrees by now.
+        assert!(early < 22.5);
+        assert!(late > 67.5);
+        // The two ends are mirror images of each other, and the middle is the middle.
+        assert!((early + late - 90.0).abs() < 1e-2);
+        assert!((turned(timeline.sample(1.0, 1).unwrap()[0]) - 45.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn a_pose_keeps_its_speed_through_a_key_instead_of_a_corner() {
+        let mut timeline = Timeline::default();
+        for (time, degrees) in [(0.0, 0.0), (1.0, 10.0), (2.0, 50.0), (3.0, 90.0)] {
+            timeline.set_key(time, vec![z(degrees)]);
+        }
+        let angle = |time: f32| turned(timeline.sample(time, 1).unwrap()[0]);
+        // 10 degrees a second comes in and 40 goes out. With straight lines
+        // the speed would jump at the key at 1 s; here it carries on.
+        let speed_before = (angle(1.0) - angle(0.999)) / 0.001;
+        let speed_after = (angle(1.001) - angle(1.0)) / 0.001;
+        assert!(
+            (speed_before - speed_after).abs() < 1.0,
+            "speed went from {speed_before} to {speed_after}"
+        );
     }
 }

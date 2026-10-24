@@ -59,6 +59,10 @@ pub struct Object {
     /// The object this one hangs below, if any. `transform` is then
     /// relative to the parent.
     pub parent: Option<Parenting>,
+    /// A locked object stays exactly as it is: it cannot be picked in the
+    /// viewport, moved, rotated, scaled or deleted. It still draws and
+    /// still plays its animation.
+    pub locked: bool,
 }
 
 impl Object {
@@ -89,47 +93,47 @@ impl Object {
     pub fn key_channels(&mut self, time: f32) {
         let transform = self.transform;
         let material = self.material;
-        let linear = Interpolation::Linear;
+        let smooth = Interpolation::Smooth;
         let channels = &mut self.channels;
         channels.set_key(
             Property::Position,
             time,
             Value::Vector(transform.translation),
-            linear,
+            smooth,
         );
         channels.set_key(
             Property::Rotation,
             time,
             Value::Rotation(transform.rotation),
-            linear,
+            smooth,
         );
         match self.kind {
             ObjectKind::Mesh => {
-                channels.set_key(Property::Scale, time, Value::Vector(transform.scale), linear);
+                channels.set_key(Property::Scale, time, Value::Vector(transform.scale), smooth);
                 channels.set_key(
                     Property::Colour,
                     time,
                     Value::Vector(glam::Vec3::from(material.base_color)),
-                    linear,
+                    smooth,
                 );
-                channels.set_key(Property::Roughness, time, Value::Scalar(material.roughness), linear);
-                channels.set_key(Property::Metalness, time, Value::Scalar(material.metalness), linear);
+                channels.set_key(Property::Roughness, time, Value::Scalar(material.roughness), smooth);
+                channels.set_key(Property::Metalness, time, Value::Scalar(material.metalness), smooth);
             }
             ObjectKind::Camera(lens) => {
-                channels.set_key(Property::CameraFov, time, Value::Scalar(lens.fov_degrees), linear);
+                channels.set_key(Property::CameraFov, time, Value::Scalar(lens.fov_degrees), smooth);
             }
             ObjectKind::Light(light) => {
                 channels.set_key(
                     Property::LightColour,
                     time,
                     Value::Vector(glam::Vec3::from(light.color)),
-                    linear,
+                    smooth,
                 );
                 channels.set_key(
                     Property::LightIntensity,
                     time,
                     Value::Scalar(light.intensity),
-                    linear,
+                    smooth,
                 );
             }
         }
@@ -236,6 +240,10 @@ impl Scene {
     /// object, or becomes object 0 when the active one was removed.
     pub fn remove_object(&mut self, index: usize) -> bool {
         if index == 0 || index >= self.objects.len() {
+            return false;
+        }
+     // A locked object cannot be deleted.
+        if self.objects[index].locked {
             return false;
         }
         // The object's children stay where they are and move up to its parent.
@@ -451,6 +459,14 @@ let bone = match link.bone {
         if index >= self.objects.len() {
             return false;
         }
+        // A locked object cannot be moved.
+        if self.objects[index].locked {
+            return false;
+        }
+                // A locked object cannot be moved.
+        if self.objects[index].locked {
+            return false;
+        }
         let (Some(parent_index), Some(link)) = (self.parent_of(index), self.objects[index].parent)
         else {
             return self.set_transform(index, world);
@@ -527,6 +543,39 @@ pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
                     true
             }
         }
+    }
+
+    /// Locks or unlocks the object at `index`. False, changing nothing, for
+    /// an unknown index.
+    pub fn set_locked(&mut self, index: usize, locked: bool) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) => {
+                object.locked = locked;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Locks every object except the active one, which is unlocked: the
+    /// "work on this one only" switch.
+    pub fn lock_all_except_active(&mut self) {
+        let keep = self.active_object;
+        for (index, object) in self.objects.iter_mut().enumerate() {
+            object.locked = index != keep;
+        }
+    }
+
+    /// Unlocks every object.
+    pub fn unlock_all(&mut self) {
+        for object in self.objects.iter_mut() {
+            object.locked = false;
+        }
+    }
+
+    /// For each object, in list order, whether it is locked.
+    pub fn locks(&self) -> Vec<bool> {
+        self.objects.iter().map(|object| object.locked).collect()
     }
 
     /// The index of the scene camera: the first camera in the list, which
@@ -655,6 +704,54 @@ pub fn remove_active_object() -> Option<usize> {
     } else {
         None
     }
+}
+
+/// Locks or unlocks the object at `index` (see `Scene::set_locked`).
+pub fn set_object_locked(index: usize, locked: bool) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => scene.set_locked(index, locked),
+        None => false,
+    }
+}
+
+/// Locks every object of the active scene except the active one.
+pub fn lock_all_except_active() {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.lock_all_except_active();
+    }
+}
+
+/// Unlocks every object of the active scene.
+pub fn unlock_all() {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.unlock_all();
+    }
+}
+
+/// For each object of the active scene, in list order, whether it is locked.
+pub fn object_locks() -> Vec<bool> {
+    let guard = PROJECT.lock().unwrap();
+    guard
+        .scenes
+        .get(guard.active_scene)
+        .map_or_else(Vec::new, |scene| scene.locks())
+}
+
+/// Whether the active object is locked.
+pub fn active_locked() -> bool {
+    let guard = PROJECT.lock().unwrap();
+    guard.scenes.get(guard.active_scene).map_or(false, |scene| {
+        scene
+            .objects
+            .get(scene.active_object)
+            .map_or(false, |object| object.locked)
+    })
 }
 
 /// The active object's index and transform.
@@ -1402,6 +1499,53 @@ let mut scene = Scene::default();
     }
 
     #[test]
+    fn a_locked_object_cannot_be_deleted_until_it_is_unlocked() {
+        let mut scene = scene_with(3, 0);
+        assert!(scene.set_locked(2, true));
+        assert!(!scene.remove_object(2));
+        assert_eq!(scene.objects.len(), 3);
+        assert!(scene.set_locked(2, false));
+        assert!(scene.remove_object(2));
+        assert_eq!(scene.objects.len(), 2);
+        assert!(!scene.set_locked(9, true));
+    }
+
+    #[test]
+    fn lock_all_except_active_locks_the_others_and_unlock_all_frees_them() {
+        let mut scene = scene_with(4, 2);
+        scene.lock_all_except_active();
+        assert_eq!(scene.locks(), vec![true, true, false, true]);
+        scene.unlock_all();
+        assert_eq!(scene.locks(), vec![false, false, false, false]);
+    }
+
+    #[test]
+    fn a_locked_object_cannot_be_moved_but_others_can() {
+        let mut scene = scene_with(2, 0);
+        let mut wanted = transform::Transform::default();
+        wanted.translation = glam::Vec3::new(1.0, 2.0, 3.0);
+        assert!(scene.set_locked(0, true));
+        assert!(!scene.set_world_transform(0, wanted));
+        assert_eq!(scene.objects[0].transform, transform::Transform::default());
+        assert!(scene.set_world_transform(1, wanted));
+        assert!(scene.set_locked(0, false));
+        assert!(scene.set_world_transform(0, wanted));
+        assert_eq!(scene.objects[0].transform, wanted);
+    }
+
+    #[test]
+    fn a_locked_object_still_plays_its_animation() {
+        let mut scene = scene_with(1, 0);
+        scene.objects[0].key_channels(0.0);
+        scene.objects[0].transform.translation = glam::Vec3::new(4.0, 0.0, 0.0);
+        scene.objects[0].key_channels(2.0);
+        assert!(scene.set_locked(0, true));
+        let frames = scene.evaluate_at(1.0);
+        let at = frames[0].model.transform_point3(glam::Vec3::ZERO);
+        assert!((at - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+    }
+
+    #[test]
     fn the_loaded_model_and_bad_indices_cannot_be_removed() {
     let mut scene = scene_with(3, 1);
         assert!(!scene.remove_object(0));
@@ -1409,5 +1553,30 @@ let mut scene = Scene::default();
         assert!(!scene.remove_object(99));
         assert_eq!(scene.objects.len(), 3);
         assert_eq!(scene.active_object, 1);
+    }
+}
+
+
+#[cfg(test)]
+mod smooth_key_tests {
+    use super::*;
+
+    #[test]
+    fn keys_made_from_an_object_ease_between_moments() {
+        let mut scene = Scene::default();
+        scene.objects.push(Object::default());
+        let object = &mut scene.objects[0];
+        object.key_channels(0.0);
+        object.transform.translation = glam::Vec3::new(4.0, 0.0, 0.0);
+        object.key_channels(2.0);
+
+        // A straight line would be at x = 1 a quarter of the way through.
+        // Easing out of the first key means it has moved less than that.
+        assert!(object.apply_channels(0.5));
+        assert!(object.transform.translation.x > 0.0);
+        assert!(object.transform.translation.x < 1.0);
+        // The middle is still the middle.
+        assert!(object.apply_channels(1.0));
+        assert!((object.transform.translation.x - 2.0).abs() < 1e-4);
     }
 }

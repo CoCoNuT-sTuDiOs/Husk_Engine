@@ -95,3 +95,4 @@ impl AnimationClip {
 pub mod channels;
 pub mod keyframes;
 pub mod pose;
+pub mod curve;

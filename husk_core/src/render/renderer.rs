@@ -118,6 +118,91 @@ fn lights_uniform(
     uniform
 }
 
+
+/// A point inside the view of a camera at `eye` looking at `target`, with a
+/// vertical field of view of `fov` radians, in a frame `aspect` (width over
+/// height) wide. It is `depth_fraction` of the way from the eye to the
+/// target, then moved right and up by `right_fraction` and `up_fraction` of
+/// what the frame shows at that depth: 0 is the middle, 1 the edge of the
+/// frame, and a negative number goes left or down.
+fn spot_in_view(
+    eye: glam::Vec3,
+    target: glam::Vec3,
+    fov: f32,
+    aspect: f32,
+    depth_fraction: f32,
+    right_fraction: f32,
+    up_fraction: f32,
+) -> glam::Vec3 {
+    let to_target = target - eye;
+    let distance = to_target.length();
+    let forward = if distance > 1e-6 {
+        to_target / distance
+    } else {
+        -glam::Vec3::Z
+    };
+    // Looking straight up or down has no sideways direction of its own.
+    let mut right = forward.cross(glam::Vec3::Y);
+    if right.length_squared() < 1e-8 {
+        right = glam::Vec3::X;
+    }
+    let right = right.normalize();
+    let up = right.cross(forward);
+    let depth = distance * depth_fraction;
+    let half_height = depth * (fov * 0.5).tan();
+    let half_width = half_height * aspect;
+    eye + forward * depth + right * (half_width * right_fraction) + up * (half_height * up_fraction)
+}
+
+/// What the ground grid's shader reads: the camera, the camera's distance
+/// from what it looks at, and the colour of the plain grid lines.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GridUniform {
+    view_proj: [[f32; 4]; 4],
+    inverse_view_proj: [[f32; 4]; 4],
+    camera_pos: [f32; 4],
+    params: [f32; 4],
+    line_color: [f32; 4],
+}
+
+/// How bright the ground grid's lines are: light on a dark background and
+/// dark on a light one, so they show on either.
+fn grid_line_brightness(red: f64, green: f64, blue: f64) -> f32 {
+    let brightness = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    if brightness > 0.5 {
+        0.1
+    } else {
+        0.8
+    }
+}
+
+/// What the background gradient's shader reads: the colour at the top, the
+/// colour at the bottom, and where the gradient starts and how tall it is
+/// (in pixel rows).
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct BackgroundUniform {
+    top: [f32; 4],
+    bottom: [f32; 4],
+    span: [f32; 4],
+}
+
+/// Packs the background gradient for the shader. `frame_top` and
+/// `frame_height` are the pixel rows the gradient runs over.
+fn background_uniform(
+    top: [f32; 3],
+    bottom: [f32; 3],
+    frame_top: f32,
+    frame_height: f32,
+) -> BackgroundUniform {
+    BackgroundUniform {
+        top: [top[0], top[1], top[2], 1.0],
+        bottom: [bottom[0], bottom[1], bottom[2], 1.0],
+        span: [frame_top, frame_height, 0.0, 0.0],
+    }
+}
+
 /// One drawable thing in the scene: its own geometry, its own bone
 /// matrices, and its own placement and colour.
 struct RenderObject {
@@ -174,7 +259,22 @@ pub struct Renderer {
     orbit_distance: f32,
     orbit_target: glam::Vec3,
     scene_camera: Option<CameraView>,
-    camera_view_on: bool,
+        camera_view_on: bool,
+    grid_pipeline: wgpu::RenderPipeline,
+    grid_buffer: wgpu::Buffer,
+    grid_bind_group: wgpu::BindGroup,
+    /// Whether the ground grid is drawn (it never is in the shape tray's
+    /// previews, and not while looking through the scene camera).
+    show_grid: bool,
+    background_pipeline: wgpu::RenderPipeline,
+    background_buffer: wgpu::Buffer,
+    background_bind_group: wgpu::BindGroup,
+    /// The colour at the top of the background gradient. The bottom colour
+    /// is `clear_color`.
+    background_top: [f32; 3],
+    /// Whether the background is a gradient (never in the shape tray's
+    /// previews, which need a plain background to cut out).
+    gradient_on: bool,
 }
 
 const BYTES_PER_PIXEL: u32 = 4;
@@ -397,6 +497,165 @@ impl Renderer {
             cache: None,
         });
 
+                // The ground grid: drawn after the objects, tested against their
+        // depth but not writing any, and blended over them.
+        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("husk_grid_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("grid.wgsl").into()),
+        });
+        let grid_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("husk_grid_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let grid_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("husk_grid_buffer"),
+            size: std::mem::size_of::<GridUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let grid_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("husk_grid_bind_group"),
+            layout: &grid_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: grid_buffer.as_entire_binding(),
+            }],
+        });
+        let grid_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("husk_grid_pipeline_layout"),
+            bind_group_layouts: &[&grid_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("husk_grid_pipeline"),
+            layout: Some(&grid_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_shader,
+                entry_point: "vs_main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_shader,
+                entry_point: "fs_main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+                // The background gradient: one full-screen pass drawn before the
+        // objects, ignoring depth.
+        let background_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("husk_background_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("background.wgsl").into()),
+        });
+        let background_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("husk_background_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let background_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("husk_background_buffer"),
+            size: std::mem::size_of::<BackgroundUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let background_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("husk_background_bind_group"),
+            layout: &background_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: background_buffer.as_entire_binding(),
+            }],
+        });
+        let background_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("husk_background_pipeline_layout"),
+                bind_group_layouts: &[&background_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let background_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("husk_background_pipeline"),
+            layout: Some(&background_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &background_shader,
+                entry_point: "vs_main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &background_shader,
+                entry_point: "fs_main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let mut orbit_target = glam::Vec3::ZERO;
         let mut orbit_distance = 3.354_102_f32;
         if !mesh.positions.is_empty() {
@@ -458,6 +717,15 @@ impl Renderer {
             orbit_target,
             scene_camera: None,
             camera_view_on: false,
+            grid_pipeline,
+            grid_buffer,
+            grid_bind_group,
+            show_grid: true,
+            background_pipeline,
+            background_buffer,
+            background_bind_group,
+            background_top: crate::scene::world::World::default().background_top,
+            gradient_on: false,
         }
         }
 
@@ -558,6 +826,7 @@ impl Renderer {
         // A light neutral grey-blue, so the shape reads on the dark panel.
         const PREVIEW_COLOR: [f32; 4] = [0.70, 0.72, 0.76, 1.0];
         let mut renderer = Renderer::new(size, size, mesh);
+        renderer.show_grid = false;
         renderer.objects[0].base_color = PREVIEW_COLOR;
         // Fit the whole shape (its bounding sphere) in the frame, so every
         // preview fills about the same share of its tile.
@@ -652,8 +921,19 @@ impl Renderer {
         mesh: crate::geometry::mesh::MeshData,
     ) -> (usize, glam::Mat4, [f32; 4]) {
         const CAMERA_COLOR: [f32; 4] = [0.75, 0.75, 0.78, 1.0];
+        // Off to the side and above, inside the view, aimed at what the
+        // viewport is looking at: seen from outside, like a cameraman.
+        let position = spot_in_view(
+            self.eye(),
+            self.orbit_target,
+            std::f32::consts::FRAC_PI_4,
+            self.width as f32 / self.height as f32,
+            0.55,
+            0.55,
+            0.35,
+        );
         let placed =
-            glam::Mat4::look_at_rh(self.eye(), self.orbit_target, glam::Vec3::Y).inverse();
+            glam::Mat4::look_at_rh(position, self.orbit_target, glam::Vec3::Y).inverse();
         let model = placed * glam::Mat4::from_scale(glam::Vec3::splat(self.orbit_distance * 0.06));
         let index = self.add_object(mesh, model, CAMERA_COLOR);
         (index, model, CAMERA_COLOR)
@@ -664,8 +944,16 @@ impl Renderer {
         mesh: crate::geometry::mesh::MeshData,
     ) -> (usize, glam::Mat4, [f32; 4]) {
         const LIGHT_COLOR: [f32; 4] = [0.98, 0.84, 0.35, 1.0];
-        let position = self.orbit_target
-            + glam::Vec3::new(0.4, 0.8, 0.4).normalize() * self.orbit_distance * 1.2;
+        // Upper left, inside the view, so a new light is always on screen.
+        let position = spot_in_view(
+            self.eye(),
+            self.orbit_target,
+            std::f32::consts::FRAC_PI_4,
+            self.width as f32 / self.height as f32,
+            0.7,
+            -0.6,
+            0.6,
+        );
         let placed =
             glam::Mat4::look_at_rh(position, self.orbit_target, glam::Vec3::Y).inverse();
         let model = placed * glam::Mat4::from_scale(glam::Vec3::splat(self.orbit_distance * 0.06));
@@ -865,8 +1153,52 @@ impl Renderer {
             );
         }
 
+                // The ground grid reads the camera from its own uniform.
+        let grid_line = grid_line_brightness(
+            self.clear_color.r,
+            self.clear_color.g,
+            self.clear_color.b,
+        );
+        // With a gradient, the lines are light or dark for the middle of it.
+        let grid_line = if self.gradient_on {
+            grid_line_brightness(
+                (self.clear_color.r + self.background_top[0] as f64) * 0.5,
+                (self.clear_color.g + self.background_top[1] as f64) * 0.5,
+                (self.clear_color.b + self.background_top[2] as f64) * 0.5,
+            )
+        } else {
+            grid_line
+        };
+        let grid_uniform = GridUniform {
+        view_proj: view_proj.to_cols_array_2d(),
+            inverse_view_proj: view_proj.inverse().to_cols_array_2d(),
+            camera_pos: [eye.x, eye.y, eye.z, 1.0],
+            params: [self.orbit_distance, 0.0, 0.0, 0.0],
+            line_color: [grid_line, grid_line, grid_line, 1.0],
+        };
+        self.queue
+            .write_buffer(&self.grid_buffer, 0, bytemuck::bytes_of(&grid_uniform));
+
+        // The background gradient runs over the output frame when looking
+        // through the scene camera, and over the whole viewport otherwise.
+        let (frame_top, frame_height) = match self.camera_frame_rect() {
+            Some((_, y, _, height)) => (y, height),
+            None => (0.0, self.height as f32),
+        };
+        let background = background_uniform(
+            self.background_top,
+            [
+                self.clear_color.r as f32,
+                self.clear_color.g as f32,
+                self.clear_color.b as f32,
+            ],
+            frame_top,
+            frame_height,
+        );
+        self.queue
+            .write_buffer(&self.background_buffer, 0, bytemuck::bytes_of(&background));
         let mut encoder = self
-            .device
+        .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -896,6 +1228,12 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
+            // The background gradient goes first, behind everything.
+            if self.gradient_on {
+                pass.set_pipeline(&self.background_pipeline);
+                pass.set_bind_group(0, &self.background_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(2, &self.lights_bind_group, &[]);
             pass.set_bind_group(3, &self.world_bind_group, &[]);
@@ -904,9 +1242,20 @@ impl Renderer {
                 pass.set_bind_group(1, &object.bone_bind_group, &[]);
                 pass.set_vertex_buffer(0, object.vertex_buffer.slice(..));
                 pass.set_index_buffer(object.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..object.num_indices, 0, 0..1);
+                                pass.draw_indexed(0..object.num_indices, 0, 0..1);
             }
-        }
+
+            // The ground grid goes last, so objects hide it where they are
+            // in front and it shows through where they cross the ground.
+            // Looking through the scene camera, it stays off: that view is
+            // what the video will show.
+            if self.show_grid && self.camera_through().is_none() {
+                pass.set_pipeline(&self.grid_pipeline);
+                pass.set_bind_group(0, &self.grid_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+
+            }
 
         let unpadded_bytes_per_row = self.width * BYTES_PER_PIXEL;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -1039,8 +1388,10 @@ impl Renderer {
     /// objects and how strong the studio light is. The scene is the source
     /// of truth, so this is called after anything that changes it.
     pub fn set_world(&mut self, world: &crate::scene::world::World) {
+        self.background_top = world.background_top;
+        self.gradient_on = world.gradient;
         self.clear_color = wgpu::Color {
-            r: world.background[0] as f64,
+        r: world.background[0] as f64,
             g: world.background[1] as f64,
             b: world.background[2] as f64,
             a: 1.0,
@@ -1224,22 +1575,42 @@ impl Renderer {
     /// nearest object along the ray wins; None if the pixel shows empty
     /// space. Tests the objects' rest shapes, not their posed ones.
     pub fn pick_object(&self, screen_x: f32, screen_y: f32) -> Option<usize> {
-        let ray = crate::render::picking::Ray::from_screen(
+        self.pick_object_except(screen_x, screen_y, &[])
+    }
+
+    /// Like `pick_object`, but an object whose entry in `locked` is true
+    /// cannot be hit: the ray goes through it to whatever is behind.
+    pub fn pick_object_except(
+        &self,
+        screen_x: f32,
+        screen_y: f32,
+        locked: &[bool],
+    ) -> Option<usize> {
+    let ray = crate::render::picking::Ray::from_screen(
             screen_x,
             screen_y,
             self.width as f32,
             self.height as f32,
             self.last_view_proj,
         );
+                // A locked object is given an empty mesh, which no ray can hit, so
+        // every object keeps its place in the list and its index.
+        let no_positions: &[[f32; 3]] = &[];
+        let no_indices: &[u32] = &[];
         let placed: Vec<(glam::Mat4, &[[f32; 3]], &[u32])> = self
             .objects
             .iter()
-            .map(|object| {
-                (
-                    object.model,
-                    object.mesh_data.positions.as_slice(),
-                    object.mesh_data.indices.as_slice(),
-                )
+            .enumerate()
+            .map(|(index, object)| {
+                if locked.get(index).copied().unwrap_or(false) {
+                    (object.model, no_positions, no_indices)
+                } else {
+                    (
+                        object.model,
+                        object.mesh_data.positions.as_slice(),
+                        object.mesh_data.indices.as_slice(),
+                    )
+                }
             })
             .collect();
         crate::render::picking::pick_nearest(&ray, &placed)
@@ -1350,8 +1721,71 @@ mod tests {
     }
 
     #[test]
+    fn a_spot_in_view_lands_exactly_where_the_fractions_say_on_screen() {
+        let eye = glam::Vec3::new(0.0, 2.0, 5.0);
+        let target = glam::Vec3::new(0.0, 1.0, 0.0);
+        let fov = std::f32::consts::FRAC_PI_4;
+        let aspect = 16.0 / 9.0;
+        let view_proj = glam::Mat4::perspective_rh(fov, aspect, 0.1, 100.0)
+            * glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+        for (depth, right, up) in [(0.55, 0.55, 0.35), (0.7, -0.6, 0.6), (0.7, 0.6, -0.6)] {
+            let spot = spot_in_view(eye, target, fov, aspect, depth, right, up);
+            let clip = view_proj * spot.extend(1.0);
+            assert!(clip.w > 0.0, "the spot was behind the camera");
+            // The fractions are exactly where it lands, in screen units
+            // that run from -1 (left, bottom) to 1 (right, top).
+            assert!((clip.x / clip.w - right).abs() < 1e-3);
+            assert!((clip.y / clip.w - up).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn a_spot_in_view_works_when_looking_straight_down_or_at_the_eye() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let down = spot_in_view(
+            glam::Vec3::new(0.0, 5.0, 0.0),
+            glam::Vec3::ZERO,
+            fov,
+            1.5,
+            0.7,
+            -0.6,
+            0.6,
+        );
+        assert!(down.is_finite());
+        let at_eye = spot_in_view(glam::Vec3::ONE, glam::Vec3::ONE, fov, 1.5, 0.7, 0.5, 0.5);
+        assert!(at_eye.is_finite());
+    }
+
+    #[test]
+    fn the_grid_uniform_matches_the_layout_the_shader_expects() {
+    // Two matrices and three vec4s, all 16-byte aligned.
+        assert_eq!(std::mem::size_of::<GridUniform>(), 2 * 64 + 3 * 16);
+    }
+
+    #[test]
+    fn grid_lines_are_light_on_a_dark_background_and_dark_on_a_light_one() {
+        assert_eq!(grid_line_brightness(0.05, 0.05, 0.08), 0.8);
+        assert_eq!(grid_line_brightness(1.0, 1.0, 1.0), 0.1);
+        assert_eq!(grid_line_brightness(0.53, 0.71, 0.91), 0.1);
+    }
+
+    #[test]
+    fn the_background_uniform_matches_the_layout_the_shader_expects() {
+        // Three vec4s: top colour, bottom colour, and the span.
+        assert_eq!(std::mem::size_of::<BackgroundUniform>(), 3 * 16);
+    }
+
+    #[test]
+    fn the_background_packs_its_colours_and_the_rows_it_runs_over() {
+        let packed = background_uniform([0.1, 0.2, 0.3], [0.4, 0.5, 0.6], 10.0, 200.0);
+        assert_eq!(packed.top, [0.1, 0.2, 0.3, 1.0]);
+        assert_eq!(packed.bottom, [0.4, 0.5, 0.6, 1.0]);
+        assert_eq!(packed.span, [10.0, 200.0, 0.0, 0.0]);
+    }
+
+    #[test]
     fn no_lights_packs_to_a_count_of_zero() {
-        let uniform = lights_uniform(&[]);
+    let uniform = lights_uniform(&[]);
         assert_eq!(uniform.count, [0, 0, 0, 0]);
     }
 

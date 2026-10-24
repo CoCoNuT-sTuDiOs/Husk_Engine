@@ -1,5 +1,5 @@
+use crate::animation::curve;
 use glam::{Quat, Vec3};
-
 /// Two keys closer together than this (in seconds) count as the same key,
 /// as in the pose timeline.
 const KEY_MERGE_SECONDS: f32 = 0.005;
@@ -13,6 +13,10 @@ pub enum Interpolation {
     /// the short way round (so one segment never turns more than half a
     /// circle).
     Linear,
+    /// Eases through the keys along a smooth curve (see `animation::curve`):
+    /// level at peaks and at the ends, and carrying its speed through a key
+    /// everywhere else, so there are no corners and no overshoot.
+    Smooth,
 }
 
 /// What a channel animates on its object.
@@ -109,34 +113,70 @@ impl Channel {
     }
 
 
-    /// Like `sample`, for an animation that repeats every `period` seconds
-    /// from its first key: after the last key the value blends back round
-    /// to the first key's value, and then the cycle starts over. With no
-    /// period, or one that does not reach past the last key, it is just
-    /// `sample`.
+    /// The key at position `index` as the keys would continue if they kept
+    /// repeating every `period` seconds: its time and value. Without a
+    /// repeat only the real keys exist, and anything else is None.
+    fn key_at(&self, index: isize, period: Option<f32>) -> Option<(f32, Value)> {
+        let count = self.keys.len() as isize;
+        if count == 0 {
+            return None;
+        }
+        if (0..count).contains(&index) {
+            let key = &self.keys[index as usize];
+            return Some((key.time, key.value));
+        }
+        let period = period?;
+        let cycles = index.div_euclid(count);
+        let key = &self.keys[index.rem_euclid(count) as usize];
+        Some((key.time + cycles as f32 * period, key.value))
+    }
+
+    /// The value at `time` (seconds), for an animation that may repeat every
+    /// `period` seconds from its first key: after the last key the value
+    /// goes on to the first key of the next cycle, and then the cycle starts
+    /// over. With no period, or one that does not reach past the last key,
+    /// the animation does not repeat: before the first key and after the
+    /// last the value holds. Between two keys it follows the earlier key's
+    /// interpolation. None if there are no keys.
     pub fn sample_looped(&self, time: f32, period: Option<f32>) -> Option<Value> {
         let first = self.keys.first()?;
         let last = self.keys.last()?;
-        let period = match period {
-            Some(p) if p > last.time - first.time => p,
-            _ => return self.sample(time),
-        };
+        let period = period.filter(|p| *p > last.time - first.time);
         if time <= first.time {
             return Some(first.value);
         }
-        let time = first.time + (time - first.time) % period;
-        if time >= last.time {
-            return Some(match last.interpolation {
-                Interpolation::Step => last.value,
-                Interpolation::Linear => {
-                    let t = (time - last.time) / (first.time + period - last.time);
-                    last.value.blend(first.value, t)
-                }
-            });
+        // With a repeat, fold the time back into the first cycle.
+        let time = match period {
+            Some(p) => first.time + (time - first.time) % p,
+            None => time,
+        };
+        // The key the segment starts at. After the last key a repeat goes on
+        // to the first key of the next cycle; without one the value holds.
+        let start = if time >= last.time {
+            if period.is_none() {
+                return Some(last.value);
+            }
+            self.keys.len() as isize - 1
+        } else {
+            self.keys.iter().position(|key| key.time > time)? as isize - 1
+        };
+        let a = &self.keys[start as usize];
+        let (b_time, b_value) = self.key_at(start + 1, period)?;
+        match a.interpolation {
+            Interpolation::Step => Some(a.value),
+            Interpolation::Linear => {
+                let t = (time - a.time) / (b_time - a.time);
+                Some(a.value.blend(b_value, t))
+            }
+            Interpolation::Smooth => Some(smooth_value(
+                self.key_at(start - 1, period),
+                (a.time, a.value),
+                (b_time, b_value),
+                self.key_at(start + 2, period),
+                time,
+            )),
         }
-        self.sample(time)
     }
-
 
     /// Records `value` at `time` (seconds). A key already at that time is
     /// replaced. Returns false, changing nothing, if the value is not the
@@ -194,29 +234,63 @@ impl Channel {
             None => false,
         }
     }
-
-    /// The value at `time` (seconds). Before the first key and after the
-    /// last the value holds; between two keys it follows the earlier key's
-    /// interpolation. None if there are no keys.
     pub fn sample(&self, time: f32) -> Option<Value> {
-        let first = self.keys.first()?;
-        let last = self.keys.last()?;
-        if time <= first.time {
-            return Some(first.value);
+        self.sample_looped(time, None)
+    }
+
+}
+/// The value at `time` on the smooth curve from key `a` to key `b` (each with
+/// its time), shaped by the key `before` and the key `after` (None where the
+/// animation ends). A neighbour of another kind of value counts as missing.
+fn smooth_value(
+    before: Option<(f32, Value)>,
+    a: (f32, Value),
+    b: (f32, Value),
+    after: Option<(f32, Value)>,
+    time: f32,
+) -> Value {
+    match (a.1, b.1) {
+        (Value::Scalar(a_value), Value::Scalar(b_value)) => {
+            let near = |key: Option<(f32, Value)>| match key {
+                Some((t, Value::Scalar(x))) => Some((t, [x])),
+                _ => None,
+            };
+            let [out] = curve::smooth_between(
+                near(before),
+                (a.0, [a_value]),
+                (b.0, [b_value]),
+                near(after),
+                time,
+            );
+            Value::Scalar(out)
         }
-        if time >= last.time {
-            return Some(last.value);
+        (Value::Vector(a_value), Value::Vector(b_value)) => {
+            let near = |key: Option<(f32, Value)>| match key {
+                Some((t, Value::Vector(v))) => Some((t, v.to_array())),
+                _ => None,
+            };
+            Value::Vector(Vec3::from(curve::smooth_between(
+                near(before),
+                (a.0, a_value.to_array()),
+                (b.0, b_value.to_array()),
+                near(after),
+                time,
+            )))
         }
-        let next_index = self.keys.iter().position(|key| key.time > time)?;
-        let a = &self.keys[next_index - 1];
-        let b = &self.keys[next_index];
-        match a.interpolation {
-            Interpolation::Step => Some(a.value),
-            Interpolation::Linear => {
-                let t = (time - a.time) / (b.time - a.time);
-                Some(a.value.blend(b.value, t))
-            }
+        (Value::Rotation(a_value), Value::Rotation(b_value)) => {
+            let near = |key: Option<(f32, Value)>| match key {
+                Some((t, Value::Rotation(q))) => Some((t, q)),
+                _ => None,
+            };
+            Value::Rotation(curve::smooth_rotation(
+                near(before),
+                (a.0, a_value),
+                (b.0, b_value),
+                near(after),
+                time,
+            ))
         }
+        _ => a.1,
     }
 }
 
@@ -511,5 +585,61 @@ mod tests {
         assert!((times[0] - 0.5).abs() < 1e-6);
         assert!((times[1] - 2.0).abs() < 0.01);
         assert!((times[2] - 3.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod smooth_tests {
+    use super::*;
+
+    fn scalar(value: Option<Value>) -> f32 {
+        match value {
+            Some(Value::Scalar(v)) => v,
+            other => panic!("expected a number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_smooth_channel_eases_at_its_ends_and_runs_steadily_through_a_key() {
+        let mut channel = Channel::new(Property::Roughness);
+        for time in 0..3 {
+            let value = Value::Scalar(time as f32);
+            assert!(channel.set_key(time as f32, value, Interpolation::Smooth));
+        }
+        // A straight line would be at 0.1 already; easing out of the first
+        // key means it has barely moved.
+        assert!(scalar(channel.sample(0.1)) < 0.05);
+        // Through the middle key the speed does not change: one unit a second.
+        let speed = (scalar(channel.sample(1.01)) - scalar(channel.sample(0.99))) / 0.02;
+        assert!((speed - 1.0).abs() < 0.05, "speed through the key was {speed}");
+    }
+
+    #[test]
+    fn a_smooth_repeat_comes_to_rest_at_its_turns_instead_of_a_corner() {
+        let mut channel = Channel::new(Property::Roughness);
+        assert!(channel.set_key(0.0, Value::Scalar(0.0), Interpolation::Smooth));
+        assert!(channel.set_key(1.0, Value::Scalar(1.0), Interpolation::Smooth));
+        // Up to 1 at 1 s, back down to 0 at 2 s, and so on. A straight-line
+        // blend would be 0.01 away from the turn a hundredth of a second out;
+        // easing is almost level there.
+        let at = |time: f32| scalar(channel.sample_looped(time, Some(2.0)));
+        assert!(at(0.99) > 0.999);
+        assert!(at(1.01) > 0.999);
+        assert!(at(1.99) < 0.001);
+        assert!(at(2.01) < 0.001);
+    }
+
+    #[test]
+    fn a_smooth_rotation_channel_takes_the_short_way_round() {
+        let z = |degrees: f32| Quat::from_rotation_z(degrees.to_radians());
+        let mut channel = Channel::new(Property::Rotation);
+        assert!(channel.set_key(0.0, Value::Rotation(z(10.0)), Interpolation::Smooth));
+        assert!(channel.set_key(1.0, Value::Rotation(z(350.0)), Interpolation::Smooth));
+        let halfway = match channel.sample(0.5) {
+            Some(Value::Rotation(q)) => q,
+            other => panic!("expected a rotation, got {other:?}"),
+        };
+        assert!(halfway.dot(Quat::IDENTITY).abs() > 0.99999);
+        assert!((halfway.length() - 1.0).abs() < 1e-5);
     }
 }
