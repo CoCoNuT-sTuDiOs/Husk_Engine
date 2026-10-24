@@ -56,6 +56,15 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
 
   void resetPose() => studio.resetPose();
 
+  void setLocked(BuildContext context, int index, bool locked) =>
+      showMessage(context, studio.setLocked(index, locked));
+
+  void lockOthers(BuildContext context) =>
+      showMessage(context, studio.lockOthers());
+
+  void unlockAll(BuildContext context) =>
+      showMessage(context, studio.unlockAll());
+
   /// Clears the skeleton, weights and keys, after asking.
   Future<void> resetSkeleton(BuildContext context) async {
     final confirmed = await showDialog<bool>(

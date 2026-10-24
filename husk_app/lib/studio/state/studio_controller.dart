@@ -1,23 +1,13 @@
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:husk_app/src/rust/api/simple.dart' as rust;
 
 /// What a click or drag in the viewport does.
 enum StudioTool {
-  /// Tap a joint to select it, drag a joint to pose it, drag elsewhere to orbit.
   select,
-
-  /// Tap the model to place a bone.
   placeBones,
-
-  /// Drag anywhere to move the whole character.
   move,
-
-  /// Drag an arrow on the active object to move it along that axis.
   moveObject,
-
-  /// Drag a ring around the active object to turn it about that axis.
   rotateObject,
 
   /// Drag a handle on the active object to scale it along that axis, or
@@ -171,8 +161,6 @@ BigInt? get selectedBone => _selectedBone;
   /// core owns it; this only reads it.
   rust.ObjectLight? get activeLight => rust.activeLight();
 
-  /// Sets the active light's colour and intensity. Returns false if the
-  /// engine refused it (the active object is not a light).
   bool setActiveLight((double, double, double) color, double intensity) {
     final applied = rust.setActiveLight(color: color, intensity: intensity);
     if (applied) notifyListeners();
@@ -271,10 +259,38 @@ BigInt? get selectedBone => _selectedBone;
     return (names, active.toInt());
   }
 
-  /// For each object, in list order, the index of its parent, or null at
-  /// the top level. The Rust core owns the hierarchy; this only reads it.
   List<int?> get objectParents =>
       rust.objectParents().map((parent) => parent?.toInt()).toList();
+
+  /// For each object, in list order, whether it is locked. A locked object
+  /// cannot be clicked in the viewport, moved or deleted.
+  List<bool> get objectLocks => rust.objectLocks();
+
+  /// Whether the active object is locked.
+  bool get activeLocked => rust.activeObjectLocked();
+
+  /// Locks or unlocks the object at [index]. Returns a message.
+  String setLocked(int index, bool locked) {
+    final applied =
+        rust.setObjectLocked(index: BigInt.from(index), locked: locked);
+    if (!applied) return 'Could not change that lock';
+    notifyListeners();
+    return locked ? 'Locked' : 'Unlocked';
+  }
+
+  /// Locks everything except the active object. Returns a message.
+  String lockOthers() {
+    rust.lockAllExceptActive();
+    notifyListeners();
+    return 'Everything except the active object is locked';
+  }
+
+  /// Unlocks every object. Returns a message.
+  String unlockAll() {
+    rust.unlockAllObjects();
+    notifyListeners();
+    return 'Everything is unlocked';
+  }
 
   /// Hangs the object at [child] below the one at [parent], or frees it when
   /// [parent] is null. It stays where it is. Returns a message.
@@ -326,7 +342,7 @@ BigInt? get selectedBone => _selectedBone;
   String removeActiveObject() {
     final index = rust.removeActiveObject();
     if (index == null) {
-      return 'Select a shape first (the loaded model cannot be deleted)';
+      return 'Nothing deleted: select an unlocked shape (the loaded model cannot be deleted)';
     }
     // The loaded model is the active object again; a joint selected on the
     // deleted object means nothing now.

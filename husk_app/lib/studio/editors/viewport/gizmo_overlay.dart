@@ -33,6 +33,8 @@ class GizmoOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // A locked object cannot be moved, so it gets no handles.
+    if (studio.activeLocked) return;
     switch (studio.tool) {
       case StudioTool.moveObject:
         _paintArrows(canvas, size);

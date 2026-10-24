@@ -209,6 +209,30 @@ BigInt? removeActiveObject() =>
 bool selectObject({required BigInt index}) =>
     RustLib.instance.api.crateApiSimpleSelectObject(index: index);
 
+/// Locks or unlocks the object at `index`. A locked object cannot be
+/// clicked in the viewport, moved, rotated, scaled or deleted; it still
+/// draws and plays its animation. False, changing nothing, for an unknown
+/// index.
+bool setObjectLocked({required BigInt index, required bool locked}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleSetObjectLocked(index: index, locked: locked);
+
+/// Locks every object except the active one.
+void lockAllExceptActive() =>
+    RustLib.instance.api.crateApiSimpleLockAllExceptActive();
+
+/// Unlocks every object.
+void unlockAllObjects() =>
+    RustLib.instance.api.crateApiSimpleUnlockAllObjects();
+
+/// For each object, in list order, whether it is locked.
+List<bool> objectLocks() => RustLib.instance.api.crateApiSimpleObjectLocks();
+
+/// Whether the active object is locked.
+bool activeObjectLocked() =>
+    RustLib.instance.api.crateApiSimpleActiveObjectLocked();
+
 /// The names of the built-in shapes, in the order the tray shows them.
 List<String> shapeNames() => RustLib.instance.api.crateApiSimpleShapeNames();
 
@@ -534,15 +558,26 @@ class WorldSettings {
   final double ambient;
   final double reflections;
 
+  /// The colour at the top of the background when the gradient is on; the
+  /// background colour is then the one at the bottom.
+  final (double, double, double) backgroundTop;
+  final bool gradient;
+
   const WorldSettings({
     required this.background,
     required this.ambient,
     required this.reflections,
+    required this.backgroundTop,
+    required this.gradient,
   });
 
   @override
   int get hashCode =>
-      background.hashCode ^ ambient.hashCode ^ reflections.hashCode;
+      background.hashCode ^
+      ambient.hashCode ^
+      reflections.hashCode ^
+      backgroundTop.hashCode ^
+      gradient.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -551,5 +586,7 @@ class WorldSettings {
           runtimeType == other.runtimeType &&
           background == other.background &&
           ambient == other.ambient &&
-          reflections == other.reflections;
+          reflections == other.reflections &&
+          backgroundTop == other.backgroundTop &&
+          gradient == other.gradient;
 }

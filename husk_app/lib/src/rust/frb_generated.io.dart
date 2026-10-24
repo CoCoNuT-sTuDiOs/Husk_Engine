@@ -75,6 +75,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<bool> dco_decode_list_bool(dynamic raw);
+
+  @protected
   List<(double, double)?> dco_decode_list_opt_box_autoadd_record_f_32_f_32(
     dynamic raw,
   );
@@ -267,6 +270,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<bool> sse_decode_list_bool(SseDeserializer deserializer);
 
   @protected
   List<(double, double)?> sse_decode_list_opt_box_autoadd_record_f_32_f_32(
@@ -499,6 +505,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_bool(List<bool> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_opt_box_autoadd_record_f_32_f_32(

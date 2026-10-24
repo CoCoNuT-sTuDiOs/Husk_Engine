@@ -20,11 +20,13 @@ class OutlinerPanel extends StatelessWidget {
         final (names, active) = studio.objectList;
         final parents = studio.objectParents;
         final boneParents = studio.objectBoneParents;
+        final locks = studio.objectLocks;
         final rows = _treeOrder(parents);
         return ListView.builder(
           itemCount: rows.length,
           itemBuilder: (context, position) {
             final (index, depth) = rows[position];
+            final isLocked = index < locks.length && locks[index];
             return _ObjectRow(
                   name: boneParents[index] == null
                   ? names[index]
@@ -32,6 +34,8 @@ class OutlinerPanel extends StatelessWidget {
               active: index == active,
               depth: depth,
               onTap: () => studio.selectObject(index),
+              locked: isLocked,
+              onToggleLock: () => actions.setLocked(context, index, !isLocked),
               onDelete: index == 0
                   ? null
                   : () => actions.deleteObjectAt(context, index),
@@ -122,6 +126,8 @@ class _ObjectRow extends StatelessWidget {
     required this.onDelete,
     required this.depth,
     required this.menuItems,
+    required this.locked,
+    required this.onToggleLock,
     required this.onMenu,
   });
 
@@ -129,6 +135,11 @@ class _ObjectRow extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
+
+  /// Whether the object is locked (cannot be clicked in the viewport,
+  /// moved or deleted).
+  final bool locked;
+  final VoidCallback onToggleLock;
 
   /// How many parents this object hangs below; the row is indented by it.
   final int depth;
@@ -164,6 +175,17 @@ class _ObjectRow extends StatelessWidget {
                   fontSize: 12,
                 ),
               ),
+            ),
+            IconButton(
+              tooltip: locked ? 'Unlock' : 'Lock',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+              icon: Icon(
+                locked ? Icons.lock_outline : Icons.lock_open_outlined,
+                size: 14,
+                color: locked ? HuskColors.orange : HuskColors.textSecondary,
+              ),
+              onPressed: onToggleLock,
             ),
             PopupMenuButton<int>(
               tooltip: 'Parent',

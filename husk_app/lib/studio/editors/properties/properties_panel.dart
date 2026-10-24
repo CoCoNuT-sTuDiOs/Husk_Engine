@@ -46,6 +46,10 @@ class PropertiesPanel extends StatelessWidget {
                 child: _CameraSection(studio: studio),
               ),
             CollapsibleSection(
+              title: 'Lock',
+              child: _LockSection(actions: actions),
+            ),
+            CollapsibleSection(
               title: 'Skeleton',
               child: _SkeletonSection(studio: studio),
             ),
@@ -174,9 +178,12 @@ class _WorldSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final world = studio.world;
     final (r, g, b) = world.background;
+    final (tr, tg, tb) = world.backgroundTop;
 
     void change({
       (double, double, double)? background,
+      (double, double, double)? backgroundTop,
+      bool? gradient,
       double? ambient,
       double? reflections,
     }) {
@@ -185,6 +192,8 @@ class _WorldSection extends StatelessWidget {
           background: background ?? world.background,
           ambient: ambient ?? world.ambient,
           reflections: reflections ?? world.reflections,
+          backgroundTop: backgroundTop ?? world.backgroundTop,
+          gradient: gradient ?? world.gradient,
         ),
       );
     }
@@ -216,7 +225,10 @@ class _WorldSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Background', style: HuskText.readout),
+        Text(
+          world.gradient ? 'Bottom colour' : 'Background',
+          style: HuskText.readout,
+        ),
         const SizedBox(height: 6),
         Wrap(
           spacing: 6,
@@ -264,6 +276,75 @@ class _WorldSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
+                Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Gradient background',
+                style: TextStyle(fontSize: 13),
+              ),
+            ),
+            Switch(
+              value: world.gradient,
+              onChanged: (on) => change(gradient: on),
+            ),
+          ],
+        ),
+        if (world.gradient) ...[
+          const Text('Top colour', style: HuskText.readout),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final swatch in _backgroundSwatches)
+                _Swatch(
+                  color: swatch,
+                  onTap: () => change(
+                    backgroundTop: (swatch.r, swatch.g, swatch.b),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: NumberField(
+                  label: 'R',
+                  labelColor: HuskColors.error,
+                  value: (tr * 255).roundToDouble(),
+                  onChanged: (v) => change(
+                    backgroundTop: (v.clamp(0.0, 255.0) / 255, tg, tb),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: NumberField(
+                  label: 'G',
+                  labelColor: HuskColors.success,
+                  value: (tg * 255).roundToDouble(),
+                  onChanged: (v) => change(
+                    backgroundTop: (tr, v.clamp(0.0, 255.0) / 255, tb),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: NumberField(
+                  label: 'B',
+                  labelColor: HuskColors.blue,
+                  value: (tb * 255).roundToDouble(),
+                  onChanged: (v) => change(
+                    backgroundTop: (tr, tg, v.clamp(0.0, 255.0) / 255),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
         strength('Ambient', world.ambient, (v) => change(ambient: v)),
         strength('Reflections', world.reflections, (v) => change(reflections: v)),
       ],
@@ -578,12 +659,14 @@ class _TransformSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
- final t = studio.activeTransform;
+final t = studio.activeTransform;
+    final locked = studio.activeLocked;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _VectorRow(
           label: 'Position',
+          enabled: !locked,
           value: t.position,
           onChanged: (v) => studio.setActiveTransform(
             ObjectTransform(
@@ -595,6 +678,7 @@ class _TransformSection extends StatelessWidget {
         ),
         _VectorRow(
           label: 'Rotation (degrees)',
+          enabled: !locked,
           value: t.rotationDegrees,
           onChanged: (v) => studio.setActiveTransform(
             ObjectTransform(
@@ -606,6 +690,7 @@ class _TransformSection extends StatelessWidget {
         ),
         _VectorRow(
           label: 'Scale',
+          enabled: !locked,
           value: t.scale,
           onChanged: (v) => studio.setActiveTransform(
             ObjectTransform(
@@ -679,6 +764,37 @@ class _VectorRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Keeps objects from being changed by accident. The padlock on each
+/// Outliner row locks or unlocks one object; these buttons lock everything
+/// but the active object (to work on it alone) or unlock everything.
+class _LockSection extends StatelessWidget {
+  const _LockSection({required this.actions});
+
+  final StudioActions actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final locks = actions.studio.objectLocks;
+    final lockedCount = locks.where((locked) => locked).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ReadoutRow(label: 'Locked', value: '$lockedCount of ${locks.length}'),
+        const SizedBox(height: 8),
+        ElevatedButton(
+          onPressed: () => actions.lockOthers(context),
+          child: const Text('Lock all others'),
+        ),
+        const SizedBox(height: 6),
+        ElevatedButton(
+          onPressed: lockedCount == 0 ? null : () => actions.unlockAll(context),
+          child: const Text('Unlock all'),
+        ),
+      ],
     );
   }
 }
