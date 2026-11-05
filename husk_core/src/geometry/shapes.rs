@@ -319,8 +319,30 @@ pub fn point_proxy() -> MeshData {
     sphere(0.5, 16, 8)
 }
 
-/// What a sun looks like in the viewport: an arrow along its own negative
-/// Z axis, the way it shines. A thin shaft from z = 0 to z = -1 and a
+ /// What a rig looks like in the viewport: a small diamond (an octahedron),
+/// about one unit tall. A rig has no surface of its own; this marker only
+/// gives it something to click on and to see.
+pub fn rig_proxy() -> MeshData {
+    use glam::Vec3;
+    let mut mesh = MeshData::default();
+    let (half_width, half_height) = (0.3, 0.5);
+    for sign_x in [-1.0_f32, 1.0] {
+        for sign_y in [-1.0_f32, 1.0] {
+            for sign_z in [-1.0_f32, 1.0] {
+                push_flat_triangle(
+                    &mut mesh,
+                    Vec3::new(sign_x * half_width, 0.0, 0.0),
+                    Vec3::new(0.0, sign_y * half_height, 0.0),
+                    Vec3::new(0.0, 0.0, sign_z * half_width),
+                    Vec3::ZERO,
+                );
+            }
+        }
+    }
+    mesh
+}
+
+/// What a sun looks like in the viewport: an arrow along its own negative/// Z axis, the way it shines. A thin shaft from z = 0 to z = -1 and a
 /// pyramid head whose tip is at z = -1.5.
 pub fn sun_proxy() -> MeshData {
     use glam::Vec3;
@@ -468,8 +490,19 @@ mod tests {
     }
 
     #[test]
+    fn the_rig_marker_is_a_well_formed_diamond() {
+        let marker = rig_proxy();
+        assert_well_formed(&marker);
+        assert_outward_winding(&marker);
+        assert_eq!(marker.triangle_count(), 8);
+        assert!((extent(&marker, 0) - 0.6).abs() < 1e-5);
+        assert!((extent(&marker, 1) - 1.0).abs() < 1e-5);
+        assert!((extent(&marker, 2) - 0.6).abs() < 1e-5);
+    }
+
+    #[test]
     fn the_light_proxies_are_well_formed_and_the_sun_points_down_negative_z() {
-        let point = point_proxy();
+    let point = point_proxy();
         assert_well_formed(&point);
         assert_outward_winding(&point);
         for axis in 0..3 {

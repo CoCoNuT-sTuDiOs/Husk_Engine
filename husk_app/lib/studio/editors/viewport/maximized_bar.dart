@@ -64,7 +64,9 @@ class MaximizedBar extends StatelessWidget {
               PopupMenuButton<String>(
                 tooltip: 'Add',
                 onSelected: (value) {
-                  if (value == 'camera') {
+                if (value == 'rig') {
+                    actions.addRig(context);
+                  } else if (value == 'camera') {
                     actions.addCamera(context);
                   } else {
                     actions.addLight(context, value);
@@ -74,6 +76,7 @@ class MaximizedBar extends StatelessWidget {
                   PopupMenuItem(value: 'sun', child: Text('Sun')),
                   PopupMenuItem(value: 'point', child: Text('Point light')),
                   PopupMenuItem(value: 'camera', child: Text('Camera')),
+                  PopupMenuItem(value: 'rig', child: Text('Rig')),
                 ],
                 child: const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),

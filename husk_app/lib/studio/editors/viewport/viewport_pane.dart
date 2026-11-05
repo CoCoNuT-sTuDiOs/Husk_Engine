@@ -4,7 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:husk_app/studio/editors/tools/tool_column.dart';
 import 'package:husk_app/studio/editors/viewport/frame_overlay.dart';
+
 import 'package:husk_app/studio/editors/viewport/gizmo_overlay.dart';
 import 'package:husk_app/studio/editors/viewport/maximized_bar.dart';
 import 'package:husk_app/studio/editors/viewport/skeleton_overlay.dart';
@@ -264,6 +266,8 @@ class _ViewportPaneState extends State<ViewportPane> {
   /// Starts a drag on a gizmo arrow if the pointer is on one; otherwise
   /// the drag orbits the camera as usual.
   void _beginGizmoDrag(Offset pointer, double scale) {
+    // A locked object has no handles, so the drag orbits instead.
+    if (_studio.activeLocked) return;
     final position = _studio.activeTransform.position;
     final axis = _viewport.gizmoAxisAt(pointer, position, scale, kGizmoLength);
     if (axis == null) return;
@@ -284,6 +288,7 @@ class _ViewportPaneState extends State<ViewportPane> {
   /// can be read (a ring seen exactly edge-on cannot); otherwise the drag
   /// orbits the camera as usual.
   void _beginRingDrag(Offset pointer, double scale) {
+    if (_studio.activeLocked) return;
     final position = _studio.activeTransform.position;
     final axis = _viewport.gizmoRingAt(
       pointer,
@@ -327,6 +332,7 @@ class _ViewportPaneState extends State<ViewportPane> {
   /// own axes: scaling along a scene axis would shear a rotated object,
   /// which an object transform cannot hold.
   void _beginScaleDrag(Offset pointer, double scale) {
+    if (_studio.activeLocked) return;
     final position = _studio.activeTransform.position;
     final axes = _studio.activeLocalAxes;
     final handle = _viewport.scaleHandleAt(
@@ -549,10 +555,16 @@ class _ViewportPaneState extends State<ViewportPane> {
                 ? const Center(
                     child: CircularProgressIndicator(color: HuskColors.orange),
                   )
-                          : Stack(
+                : Stack(
                     fit: StackFit.expand,
                     children: [
                       _buildRender(context, textureId),
+                      if (_studio.viewportMaximized)
+                        Positioned(
+                          left: 12,
+                          top: 12,
+                          child: ToolColumn(studio: _studio, floating: true),
+                        ),
                       if (_studio.viewportMaximized)
                         Positioned(
                           left: 0,

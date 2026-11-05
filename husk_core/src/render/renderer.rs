@@ -961,6 +961,26 @@ impl Renderer {
         (index, model, LIGHT_COLOR)
     }
 
+    /// Adds a rig: a small marker (`mesh`, sized to the viewing distance so
+    /// it stays visible) at the middle of what the viewport is looking at.
+    /// The marker is scaled in its own shape and the placement is a plain
+    /// move, so the rig's scale stays 1 and the bones placed in its space
+    /// are in scene units. Returns its index, its placement matrix and its
+    /// colour. The active object does not change.
+    pub fn add_rig_at_view(
+        &mut self,
+        mut mesh: crate::geometry::mesh::MeshData,
+    ) -> (usize, glam::Mat4, [f32; 4]) {
+        const RIG_COLOR: [f32; 4] = [0.45, 0.85, 0.55, 1.0];
+        let size = self.orbit_distance * 0.06;
+        for position in mesh.positions.iter_mut() {
+            *position = [position[0] * size, position[1] * size, position[2] * size];
+        }
+        let model = glam::Mat4::from_translation(self.orbit_target);
+        let index = self.add_object(mesh, model, RIG_COLOR);
+        (index, model, RIG_COLOR)
+    }
+
     /// Adds another object to the scene and returns its index. Section 5c
     /// will use this for the add-model action.
     pub fn add_object(
@@ -1238,6 +1258,11 @@ impl Renderer {
             pass.set_bind_group(2, &self.lights_bind_group, &[]);
             pass.set_bind_group(3, &self.world_bind_group, &[]);
             for object in &self.objects {
+                // An object with no triangles (the empty starting scene) has
+                // nothing to draw.
+                if object.num_indices == 0 {
+                    continue;
+                }
                 pass.set_bind_group(0, &object.bind_group, &[]);
                 pass.set_bind_group(1, &object.bone_bind_group, &[]);
                 pass.set_vertex_buffer(0, object.vertex_buffer.slice(..));

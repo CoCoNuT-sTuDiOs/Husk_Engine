@@ -18,12 +18,11 @@ pub enum ObjectKind {
     Mesh,
     Camera(camera::Camera),
     Light(light::Light),
+    /// A rig: an object that owns a skeleton and has no surface of its own.
+    /// It is drawn as a small marker so it can be clicked and seen, and its
+    /// bones are placed on a plane facing the view instead of inside a mesh.
+    Rig,
 }
-/// How an object hangs below another one: which object is its parent (by
-/// id, since list positions shift when objects are removed) and the
-/// "parent inverse" matrix that keeps the child where it was when it was
-/// parented. The child's world matrix is the parent's world matrix times
-/// `inverse` times the child's own local matrix.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Parenting {
     pub parent_id: u64,
@@ -108,9 +107,11 @@ impl Object {
             smooth,
         );
         match self.kind {
+            // A rig keys only its position and rotation, set above.
+            ObjectKind::Rig => {}
             ObjectKind::Mesh => {
                 channels.set_key(Property::Scale, time, Value::Vector(transform.scale), smooth);
-                channels.set_key(
+            channels.set_key(
                     Property::Colour,
                     time,
                     Value::Vector(glam::Vec3::from(material.base_color)),
@@ -202,7 +203,7 @@ impl Object {
                 }
                 *light = next.clamped();
             }
-            ObjectKind::Mesh => {}
+            ObjectKind::Mesh | ObjectKind::Rig => {}
         }
         applied
     }
@@ -463,10 +464,7 @@ let bone = match link.bone {
         if self.objects[index].locked {
             return false;
         }
-                // A locked object cannot be moved.
-        if self.objects[index].locked {
-            return false;
-        }
+
         let (Some(parent_index), Some(link)) = (self.parent_of(index), self.objects[index].parent)
         else {
             return self.set_transform(index, world);
@@ -754,6 +752,19 @@ pub fn active_locked() -> bool {
     })
 }
 
+
+
+/// Whether the active object is a rig.
+pub fn active_is_rig() -> bool {
+    let guard = PROJECT.lock().unwrap();
+    guard.scenes.get(guard.active_scene).map_or(false, |scene| {
+        scene
+            .objects
+            .get(scene.active_object)
+            .map_or(false, |object| object.kind == ObjectKind::Rig)
+    })
+}
+
 /// The active object's index and transform.
 pub fn active_transform() -> (usize, transform::Transform) {
     let guard = PROJECT.lock().unwrap();
@@ -820,7 +831,8 @@ pub fn active_camera() -> Option<camera::Camera> {
     let scene = guard.scenes.get(guard.active_scene)?;
     match scene.objects.get(scene.active_object)?.kind {
         ObjectKind::Camera(lens) => Some(lens),
-        ObjectKind::Mesh | ObjectKind::Light(_) => None,
+        ObjectKind::Mesh | ObjectKind::Light(_) | ObjectKind::Rig => None,
+
     }
 }
 
@@ -847,7 +859,7 @@ pub fn scene_camera() -> Option<(transform::Transform, camera::Camera)> {
     ObjectKind::Camera(lens) => {
             Some((scene.world_transform(scene.first_camera()?), lens))
         }
-        ObjectKind::Mesh | ObjectKind::Light(_) => None,
+        ObjectKind::Mesh | ObjectKind::Light(_) | ObjectKind::Rig => None,
     }
 }
 
@@ -857,7 +869,8 @@ pub fn active_light() -> Option<light::Light> {
     let scene = guard.scenes.get(guard.active_scene)?;
     match scene.objects.get(scene.active_object)?.kind {
         ObjectKind::Light(light) => Some(light),
-        ObjectKind::Mesh | ObjectKind::Camera(_) => None,
+        ObjectKind::Mesh | ObjectKind::Camera(_) | ObjectKind::Rig => None,
+
     }
 }
 
@@ -1543,6 +1556,22 @@ let mut scene = Scene::default();
         let frames = scene.evaluate_at(1.0);
         let at = frames[0].model.transform_point3(glam::Vec3::ZERO);
         assert!((at - glam::Vec3::new(2.0, 0.0, 0.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn a_rig_keys_only_its_position_and_rotation() {
+        let mut scene = scene_with(1, 0);
+        scene.objects[0].kind = ObjectKind::Rig;
+        scene.objects[0].key_channels(0.0);
+        let channels = &scene.objects[0].channels;
+        assert!(channels.sample(Property::Position, 0.0).is_some());
+        assert!(channels.sample(Property::Rotation, 0.0).is_some());
+        assert!(channels.sample(Property::Scale, 0.0).is_none());
+        assert!(channels.sample(Property::Colour, 0.0).is_none());
+        assert!(channels.sample(Property::CameraFov, 0.0).is_none());
+        // A rig is neither a camera nor a light.
+        assert!(!scene.set_camera(0, camera::Camera::default()));
+        assert!(!scene.set_light(0, light::Light::point()));
     }
 
     #[test]

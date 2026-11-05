@@ -5,16 +5,26 @@ import 'package:phosphor_icons/phosphor_icons.dart';
 
 /// The vertical strip of tools on the left of the window.
 class ToolColumn extends StatelessWidget {
-  const ToolColumn({super.key, required this.studio});
+  const ToolColumn({super.key, required this.studio, this.floating = false});
 
   final StudioController studio;
+
+  /// Whether the column floats over the viewport (while it is maximized)
+  /// instead of sitting in the window's left edge.
+  final bool floating;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: 52,
       padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: const BoxDecoration(
+      decoration: floating
+          ? BoxDecoration(
+              color: HuskColors.panel.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: HuskColors.border),
+            )
+          : const BoxDecoration(
         color: HuskColors.panel,
         border: Border(right: BorderSide(color: HuskColors.border)),
       ),
@@ -22,6 +32,9 @@ class ToolColumn extends StatelessWidget {
         listenable: studio,
         builder: (context, _) {
           return Column(
+            // Floating, it is only as tall as its buttons; in the window's
+            // left edge it fills the height as before.
+            mainAxisSize: floating ? MainAxisSize.min : MainAxisSize.max,
             children: [
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.cursor),

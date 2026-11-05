@@ -1,4 +1,3 @@
-import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:husk_app/src/rust/api/simple.dart' as rust;

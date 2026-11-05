@@ -41,6 +41,8 @@ class StudioActions {
   void addCamera(BuildContext context) =>
         showMessage(context, studio.addCamera());
 
+void addRig(BuildContext context) => showMessage(context, studio.addRig());
+
   void addLight(BuildContext context, String kind) =>
       showMessage(context, studio.addLight(kind));
   void deleteObject(BuildContext context) =>

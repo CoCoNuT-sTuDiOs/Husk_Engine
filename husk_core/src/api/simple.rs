@@ -16,14 +16,36 @@ pub fn pick(x: f64, y: f64) -> Option<(f32, f32, f32)> {
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, f32, f32)> {
-    let hit = crate::platform::ffi::with_active_renderer(|renderer| {
-        renderer.pick_inside(x as f32, y as f32)
-    })
-    .flatten()?;
-
     // The hit is in the object's own space, where its skeleton lives. The
     // transform is taken before locking the scene for the bones.
     let space = crate::scene::active_transform().1;
+    let hit = if crate::scene::active_is_rig() {
+        // A rig has no mesh to click inside. The bone goes on the plane that
+        // faces the view and passes through its parent bone (through the rig
+        // itself for the first bone), the way Blender puts a new bone on the
+        // plane through its 3D cursor. Orbit and click again to change depth.
+        let anchor = match parent {
+            Some(parent_index) => {
+                let active = crate::scene::active_object();
+                let world_matrices = active.skeleton.world_bind_matrices();
+                let position = world_matrices
+                    .get(parent_index)?
+                    .transform_point3(glam::Vec3::ZERO);
+                space.point_to_world(position)
+            }
+            None => space.translation,
+        };
+        let on_plane = crate::platform::ffi::with_active_renderer(|renderer| {
+            renderer.screen_to_view_plane(x as f32, y as f32, anchor)
+        })
+        .flatten()?;
+        space.point_to_local(on_plane)
+    } else {
+        crate::platform::ffi::with_active_renderer(|renderer| {
+            renderer.pick_inside(x as f32, y as f32)
+        })
+        .flatten()?
+    };
     let mut active = crate::scene::active_object();
     let skeleton = &mut active.skeleton;
     let local_position = match parent {
@@ -979,8 +1001,33 @@ pub fn add_camera() -> Option<usize> {
     Some(render_index)
 }
 
+/// Adds a rig (an object that owns a skeleton and has no mesh to click
+/// inside) at the middle of what the viewport is looking at. Returns its
+/// index. The active object does not change.
+#[flutter_rust_bridge::frb(sync)]
+pub fn add_rig() -> Option<usize> {
+    let (render_index, model, colour) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.add_rig_at_view(crate::geometry::shapes::rig_proxy())
+    })?;
+    let scene_index = crate::scene::add_object(
+        "Rig",
+        crate::scene::transform::Transform::from_matrix(model),
+        crate::scene::material::Material {
+            base_color: [colour[0], colour[1], colour[2]],
+            ..crate::scene::material::Material::default()
+        },
+        crate::scene::ObjectKind::Rig,
+    );
+    if scene_index != render_index {
+        eprintln!(
+            "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
+        );
+    }
+    Some(render_index)
+}
+
 /// The active object's vertical field of view in degrees, if it is a
-    /// camera; None for anything else.
+/// camera; None for anything else.
 #[flutter_rust_bridge::frb(sync)]
 pub fn active_camera_fov() -> Option<f32> {
     crate::scene::active_camera().map(|lens| lens.fov_degrees)

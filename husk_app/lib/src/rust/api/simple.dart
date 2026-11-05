@@ -351,6 +351,11 @@ bool setActiveObjectMaterial({required ObjectMaterial material}) => RustLib
 /// change.
 BigInt? addCamera() => RustLib.instance.api.crateApiSimpleAddCamera();
 
+/// Adds a rig (an object that owns a skeleton and has no mesh to click
+/// inside) at the middle of what the viewport is looking at. Returns its
+/// index. The active object does not change.
+BigInt? addRig() => RustLib.instance.api.crateApiSimpleAddRig();
+
 /// The active object's vertical field of view in degrees, if it is a
 /// camera; None for anything else.
 double? activeCameraFov() =>

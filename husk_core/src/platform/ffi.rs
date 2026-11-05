@@ -27,46 +27,15 @@ pub(crate) fn with_active_renderer_mut<R>(f: impl FnOnce(&mut Renderer) -> R) ->
 #[unsafe(no_mangle)]
 pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer {
 
-// TEMPORARY: hardcoded absolute path for Section 2 testing only.
-    // Replaced once real asset-loading (file picker / project system) exists.
     // TEMPORARY: hardcoded desktop cap, matching the PRD's current
     // (unvalidated) 500k-triangle desktop estimate. Will move to a real
     // config/settings source later.
     const MAX_DESKTOP_TRIANGLES: usize = 500_000;
 
-
-    // TEMPORARY: a rigged test model from the crate's test assets. If it
-    // loads, its skeleton and skin weights come with it. If not (missing
-    // file, no rig), the old hardcoded plain mesh loads instead.
-    const RIGGED_TEST_MODEL: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/off.glb");
-    let (mesh, rig) =
-        match crate::import::rigged::load_gltf_rig(RIGGED_TEST_MODEL, MAX_DESKTOP_TRIANGLES) {
-            Ok(model) => (model.mesh, Some((model.skeleton, model.vertex_weights))),
-            Err(e) => {
-                eprintln!("Husk: rigged test model not loaded ({e}), trying the plain mesh");
-                let mesh = crate::import::mesh::load_gltf(
-                "C:\\Users\\HomePC\\Downloads\\girl.glb", 
-                    MAX_DESKTOP_TRIANGLES,
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("Husk: failed to load test mesh ({e}), rendering empty scene");
-                    crate::geometry::mesh::MeshData::default()
-                });
-                (mesh, None)
-            }
-        };
-let mut renderer = Box::new(Renderer::new(width, height, mesh));
-    // Hand the imported rig to the renderer and to the shared scene state,
-    // so the overlay, dragging and posing tools all see it.
-    if let Some((skeleton, vertex_weights)) = rig {
-        renderer.update_vertex_weights(&vertex_weights);
-        let mut active = crate::scene::active_object();
-        active.pose = crate::animation::pose::Pose::rest_for(&skeleton);
-        active.skeleton = skeleton;
-        active.weights = Some(vertex_weights);
-
-    }
+    // The scene starts empty. Models come in through File > Import GLB, not
+    // from a path baked into the program.
+    let mesh = crate::geometry::mesh::MeshData::default();
+    let renderer = Box::new(Renderer::new(width, height, mesh));
     // The outliner calls the loaded model "Model".
     crate::scene::active_object().name = String::from("Model");
     let raw = Box::into_raw(renderer);

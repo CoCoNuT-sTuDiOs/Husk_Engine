@@ -147,6 +147,19 @@ BigInt? get selectedBone => _selectedBone;
     return null;
   }
 
+/// Adds a rig (an object that owns a skeleton and has no mesh to click
+  /// inside) at the middle of the view, makes it the active object and
+  /// switches to the Place bones tool. Returns a message when it could not
+  /// be added.
+  String? addRig() {
+    final index = rust.addRig();
+    if (index == null) return 'Could not add a rig';
+    selectObject(index.toInt());
+    setTool(StudioTool.placeBones);
+    notifyListeners();
+    return null;
+  }
+
   /// Adds a light ('sun' or 'point') and makes it the active object, so the
   /// Properties panel shows it. Returns a message when it could not be added.
   String? addLight(String kind) {
