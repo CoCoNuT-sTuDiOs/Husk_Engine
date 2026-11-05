@@ -4,6 +4,7 @@ import 'package:husk_app/studio/state/timeline_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
+import 'package:file_selector/file_selector.dart';
 
 /// The commands a user can trigger from menus, panels, headers and
 /// shortcuts. Each one lives here once, so every place that offers it
@@ -30,8 +31,19 @@ class StudioActions {
     showMessage(context, message);
   }
 
-  // Edit
+  /// Asks for a glTF or GLB file and imports it as a new object.
+  Future<void> importModel(BuildContext context) async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'glTF models', extensions: ['glb', 'gltf']),
+      ],
+    );
+    if (file == null) return;
+    if (!context.mounted) return;
+    showMessage(context, studio.importModel(file.path));
+  }
 
+  // Edit
   void undoBone(BuildContext context) =>
       showMessage(context, studio.undoLastBone());
 

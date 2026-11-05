@@ -52,7 +52,12 @@ class StudioTopBar extends StatelessWidget {
                         MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+O'),
                           onPressed: () => actions.load(context),
-                          child: const Text('Load project'),
+                        child: const Text('Load project'),
+                        ),
+                        MenuItemButton(
+                          onPressed: () => actions.importModel(context),
+                          child: const Text('Import GLB...'),
+
                         ),
                       ],
                       child: const Text('File'),

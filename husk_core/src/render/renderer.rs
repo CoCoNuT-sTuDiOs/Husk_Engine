@@ -1042,6 +1042,31 @@ impl Renderer {
         self.orbit_pitch = (self.orbit_pitch + delta_pitch).clamp(-1.5, 1.5);
     }
 
+    /// Moves the viewport camera to look at the whole of the object at
+    /// `index`: it orbits the middle of that object and stands far enough
+    /// back to see all of it. Returns the object's longest side in scene
+    /// units, or None if there is no such object or it has no geometry.
+    pub fn frame_object(&mut self, index: usize) -> Option<f32> {
+        let object = self.objects.get(index)?;
+        let mut low = glam::Vec3::splat(f32::MAX);
+        let mut high = glam::Vec3::splat(f32::MIN);
+        for position in &object.mesh_data.positions {
+            let world = object.model.transform_point3(glam::Vec3::from(*position));
+            low = low.min(world);
+            high = high.max(world);
+        }
+        if low.x > high.x {
+            return None;
+        }
+        let radius = ((high - low).length() * 0.5).max(0.01);
+        self.orbit_target = (low + high) * 0.5;
+        // The same fit the shape previews use: the whole bounding sphere in
+        // the frame, with a little room around it.
+        self.orbit_distance =
+            (radius / (std::f32::consts::FRAC_PI_4 * 0.5).sin() * 1.2).clamp(0.3, 500.0);
+        Some((high - low).max_element())
+    }
+
     /// Moves the camera closer (a factor below 1) or farther away (above 1),
     /// within sensible limits.
     pub fn zoom(&mut self, factor: f32) {

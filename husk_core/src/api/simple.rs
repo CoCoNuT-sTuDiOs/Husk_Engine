@@ -1191,6 +1191,100 @@ pub fn refresh_models() {
     push_scene_lights();
 }
 
+/// Imports a glTF or GLB file as a new object and makes it the active one.
+/// A file with a rig comes with its skeleton and skin weights; any other file
+/// comes in as a plain mesh. The viewport then looks at the new object.
+/// Returns (true, summary) or (false, reason).
+#[flutter_rust_bridge::frb(sync)]
+pub fn import_glb(path: String) -> (bool, String) {
+    // TEMPORARY: the same desktop cap the startup loader used.
+    const MAX_TRIANGLES: usize = 500_000;
+    const IMPORT_COLOR: [f32; 4] = [0.80, 0.80, 0.82, 1.0];
+
+    let (mesh, rig, note) = match crate::import::rigged::load_gltf_rig(&path, MAX_TRIANGLES) {
+        Ok(model) => (
+            model.mesh,
+            Some((model.skeleton, model.vertex_weights)),
+            String::new(),
+        ),
+        Err(rig_error) => match crate::import::mesh::load_gltf(&path, MAX_TRIANGLES) {
+            Ok(mesh) => {
+                let note = if rig_error.starts_with("This glTF file has no rig") {
+                    String::from(" (no rig in the file)")
+                } else {
+                    format!(" (the rig was not imported: {rig_error})")
+                };
+                (mesh, None, note)
+            }
+            Err(reason) => return (false, reason),
+        },
+    };
+
+    let name = std::path::Path::new(&path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("Model")
+        .to_string();
+    let vertex_count = mesh.positions.len();
+    let bone_count = rig.as_ref().map_or(0, |(skeleton, _)| skeleton.bones.len());
+
+    let Some(render_index) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.add_object(mesh, glam::Mat4::IDENTITY, IMPORT_COLOR)
+    }) else {
+        return (false, String::from("There is no renderer to import into"));
+    };
+    let scene_index = crate::scene::add_object(
+        &name,
+        crate::scene::transform::Transform::default(),
+        crate::scene::material::Material {
+            base_color: [IMPORT_COLOR[0], IMPORT_COLOR[1], IMPORT_COLOR[2]],
+            ..crate::scene::material::Material::default()
+        },
+        crate::scene::ObjectKind::Mesh,
+    );
+    if scene_index != render_index {
+        eprintln!(
+            "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
+        );
+    }
+
+    // The new object becomes the active one, so the weights below and every
+    // tool act on it.
+    crate::scene::set_active_object(render_index);
+    crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.set_active_object(render_index)
+    });
+    crate::scene::active_object().name = name.clone();
+
+    if let Some((skeleton, vertex_weights)) = rig {
+        crate::platform::ffi::with_active_renderer(|renderer| {
+            renderer.update_vertex_weights(&vertex_weights)
+        });
+        let mut active = crate::scene::active_object();
+        active.pose = crate::animation::pose::Pose::rest_for(&skeleton);
+        active.skeleton = skeleton;
+        active.weights = Some(vertex_weights);
+    }
+
+    let size = crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.frame_object(render_index)
+    })
+    .flatten();
+    let size_text = match size {
+        Some(size) => format!(", {size:.2} units across"),
+        None => String::new(),
+    };
+    let rig_text = if bone_count > 0 {
+        format!(", {bone_count} bones")
+    } else {
+        String::new()
+    };
+    (
+        true,
+        format!("Imported {name}: {vertex_count} vertices{rig_text}{size_text}{note}"),
+    )
+}
+
 /// Tells the renderer where every object is drawn: its world placement,
 /// parents included. The scene is the source of truth, so this is called
 /// after anything that moves an object that may have children.

@@ -424,6 +424,13 @@ List<BigInt?> objectBoneParents() =>
 /// anything that changes a pose, so parts that follow bones follow it.
 void refreshModels() => RustLib.instance.api.crateApiSimpleRefreshModels();
 
+/// Imports a glTF or GLB file as a new object and makes it the active one.
+/// A file with a rig comes with its skeleton and skin weights; any other file
+/// comes in as a plain mesh. The viewport then looks at the new object.
+/// Returns (true, summary) or (false, reason).
+(bool, String) importGlb({required String path}) =>
+    RustLib.instance.api.crateApiSimpleImportGlb(path: path);
+
 /// The scene's world.
 WorldSettings worldSettings() =>
     RustLib.instance.api.crateApiSimpleWorldSettings();

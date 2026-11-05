@@ -364,6 +364,23 @@ BigInt? get selectedBone => _selectedBone;
     return 'Deleted object $index';
   }
 
+  /// Imports a glTF or GLB file as a new object and selects it; the viewport
+  /// then looks at it. Returns a message.
+  String importModel(String path) {
+    final (imported, message) = rust.importGlb(path: path);
+    if (!imported) return message;
+    // Importing moves the viewport's own camera.
+    leaveCameraView();
+    // A joint selected on the previous object means nothing on this one.
+    _selectedBone = null;
+    // A rigged model is for posing; a bare one is for building a skeleton.
+    _tool = rust.boneCount() == BigInt.zero
+        ? StudioTool.placeBones
+        : StudioTool.select;
+    notifyListeners();
+    return message;
+  }
+
   /// Removes the last placed bone and selects its parent. Returns a message
   /// when there is nothing to undo.
   String? undoLastBone() {

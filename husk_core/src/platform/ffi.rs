@@ -27,11 +27,6 @@ pub(crate) fn with_active_renderer_mut<R>(f: impl FnOnce(&mut Renderer) -> R) ->
 #[unsafe(no_mangle)]
 pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer {
 
-    // TEMPORARY: hardcoded desktop cap, matching the PRD's current
-    // (unvalidated) 500k-triangle desktop estimate. Will move to a real
-    // config/settings source later.
-    const MAX_DESKTOP_TRIANGLES: usize = 500_000;
-
     // The scene starts empty. Models come in through File > Import GLB, not
     // from a path baked into the program.
     let mesh = crate::geometry::mesh::MeshData::default();
