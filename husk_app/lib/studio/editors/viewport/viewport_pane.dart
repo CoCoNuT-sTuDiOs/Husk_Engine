@@ -163,12 +163,57 @@ class _ViewportPaneState extends State<ViewportPane> {
       _viewport.zoom(1 / 1.08); // zoom in
       return true;
     }
+        if (event is KeyDownEvent && _handleViewKey(key)) return true;
     if (key == LogicalKeyboardKey.delete && event is KeyDownEvent) {
       widget.actions.deleteObject(context);
       return true;
     }
     return false;
   }
+
+  /// Blender's numpad views: 1 front, 3 right, 7 top, and with Ctrl the
+  /// opposite side. The top-row digits do the same (a laptop has no numpad),
+  /// and 5 switches between perspective and orthographic.
+  bool _handleViewKey(LogicalKeyboardKey key) {
+    final opposite = HardwareKeyboard.instance.isControlPressed;
+    String? view;
+    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
+      view = opposite ? 'back' : 'front';
+    } else if (key == LogicalKeyboardKey.digit3 ||
+        key == LogicalKeyboardKey.numpad3) {
+      view = opposite ? 'left' : 'right';
+    } else if (key == LogicalKeyboardKey.digit7 ||
+        key == LogicalKeyboardKey.numpad7) {
+      view = opposite ? 'bottom' : 'top';
+    } else if (key == LogicalKeyboardKey.digit5 ||
+        key == LogicalKeyboardKey.numpad5) {
+      widget.actions.toggleOrthographic();
+      return true;
+    }
+    if (view == null) return false;
+    widget.actions.setStandardView(view);
+    return true;
+  }
+
+  /// Dragging with the middle mouse button turns the view; with Shift held
+  /// it slides the view instead, as in Blender.
+  void _handleMiddleDrag(PointerMoveEvent event, double scale) {
+    if (event.buttons != kMiddleMouseButton) return;
+    if (HardwareKeyboard.instance.isShiftPressed) {
+      _studio.leaveCameraView();
+      // Panel pixels to render pixels, which is what the engine measures in.
+      _viewport.pan(event.delta.dx / scale, event.delta.dy / scale);
+      return;
+    }
+    // The same radians-per-pixel as the left-button orbit.
+    const dragSensitivity = 0.01;
+    _studio.leaveCameraView();
+    _viewport.orbit(
+      event.delta.dx * dragSensitivity,
+      -event.delta.dy * dragSensitivity,
+    );
+  }
+
   void _handlePointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent) {
       // Scrolling down moves the camera away, scrolling up brings it closer.
@@ -474,6 +519,7 @@ class _ViewportPaneState extends State<ViewportPane> {
         final render = Listener(
           onPointerSignal: _handlePointerSignal,
           onPointerHover: (event) => _updateHover(event.localPosition, scale),
+          onPointerMove: (event) => _handleMiddleDrag(event, scale),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapUp: (details) => _handleTap(details, scale),

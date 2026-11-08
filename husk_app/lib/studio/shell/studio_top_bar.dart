@@ -113,7 +113,47 @@ class StudioTopBar extends StatelessWidget {
                           trailingIcon: _shortcut('Ctrl+Space'),
                           onPressed: actions.toggleMaximize,
                           child: Text(
-                            maximized ? 'Restore panels' : 'Maximize viewport',
+                                                        maximized ? 'Restore panels' : 'Maximize viewport',
+                          ),
+                        ),
+                        const Divider(height: 8),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('1'),
+                          onPressed: () => actions.setStandardView('front'),
+                          child: const Text('Front'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+1'),
+                          onPressed: () => actions.setStandardView('back'),
+                          child: const Text('Back'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('3'),
+                          onPressed: () => actions.setStandardView('right'),
+                          child: const Text('Right'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+3'),
+                          onPressed: () => actions.setStandardView('left'),
+                          child: const Text('Left'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('7'),
+                          onPressed: () => actions.setStandardView('top'),
+                          child: const Text('Top'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+7'),
+                          onPressed: () => actions.setStandardView('bottom'),
+                          child: const Text('Bottom'),
+                        ),
+                        const Divider(height: 8),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('5'),
+                          onPressed: actions.toggleOrthographic,
+                          child: Text(
+                            'Perspective / Orthographic',
+
                           ),
                         ),
                       ],

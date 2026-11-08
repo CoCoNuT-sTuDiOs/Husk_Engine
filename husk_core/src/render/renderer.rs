@@ -154,6 +154,60 @@ fn spot_in_view(
     eye + forward * depth + right * (half_width * right_fraction) + up * (half_height * up_fraction)
 }
 
+/// How far the point being orbited moves in the scene when the view is
+/// dragged by (`dx`, `dy`) pixels, so the scene follows the cursor.
+///
+/// Ported from Blender's pan (GPL-2.0-or-later, Copyright Blender Authors):
+/// `viewmove_apply` in view3d_navigate.cc turns the drag into scene units with
+/// `ED_view3d_win_to_delta` (view3d_project.cc), using `zfac` from
+/// `ED_view3d_calc_zfac`. For a perspective view `zfac` is the depth of the
+/// orbited point along the view axis, which is `distance` here, so one pixel
+/// is worth 2 * distance * tan(fov / 2) / height_pixels scene units. Blender's
+/// mouse y grows upward and Flutter's grows downward, which is why a drag
+/// down adds `up` and a drag right subtracts `right`.
+fn pan_offset(
+    distance: f32,
+    fov: f32,
+    height_pixels: f32,
+    right: glam::Vec3,
+    up: glam::Vec3,
+    dx: f32,
+    dy: f32,
+) -> glam::Vec3 {
+    let units_per_pixel = 2.0 * distance * (fov * 0.5).tan() / height_pixels;
+    (up * dy - right * dx) * units_per_pixel
+}
+
+
+/// The viewport camera's (yaw, pitch) in radians for one of Blender's six
+/// standard views. Husk's scene is Y-up and models face +Z (as in glTF), so
+/// "front" looks from +Z, "right" from +X and "top" from +Y: the same sides
+/// Blender shows for the same model after its glTF import.
+fn standard_view_angles(name: &str) -> Option<(f32, f32)> {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    match name {
+        "front" => Some((0.0, 0.0)),
+        "back" => Some((PI, 0.0)),
+        "right" => Some((FRAC_PI_2, 0.0)),
+        "left" => Some((-FRAC_PI_2, 0.0)),
+        "top" => Some((0.0, FRAC_PI_2)),
+        "bottom" => Some((0.0, -FRAC_PI_2)),
+        _ => None,
+    }
+}
+
+/// The up direction of the viewport camera for a yaw and pitch. Unlike a
+/// fixed world "up" it stays defined when the camera looks straight down or
+/// up (the top and bottom views): from above it points towards the back of
+/// the scene, from below towards the front.
+fn camera_up(yaw: f32, pitch: f32) -> glam::Vec3 {
+    let (sin_yaw, cos_yaw) = yaw.sin_cos();
+    let (sin_pitch, cos_pitch) = pitch.sin_cos();
+    let right = glam::Vec3::new(cos_yaw, 0.0, -sin_yaw);
+    let forward = -glam::Vec3::new(cos_pitch * sin_yaw, sin_pitch, cos_pitch * cos_yaw);
+    right.cross(forward)
+}
+
 /// What the ground grid's shader reads: the camera, the camera's distance
 /// from what it looks at, and the colour of the plain grid lines.
 #[repr(C)]
@@ -257,7 +311,9 @@ pub struct Renderer {
     orbit_yaw: f32,
     orbit_pitch: f32,
     orbit_distance: f32,
-    orbit_target: glam::Vec3,
+        orbit_target: glam::Vec3,
+    /// Whether the viewport looks without perspective (see `orthographic`).
+    orthographic: bool,
     scene_camera: Option<CameraView>,
         camera_view_on: bool,
     grid_pipeline: wgpu::RenderPipeline,
@@ -714,7 +770,8 @@ impl Renderer {
             orbit_yaw: 0.0,
             orbit_pitch: 0.463_65,
             orbit_distance: 3.354_102,
-            orbit_target,
+             orbit_target,
+            orthographic: false,
             scene_camera: None,
             camera_view_on: false,
             grid_pipeline,
@@ -1037,9 +1094,60 @@ impl Renderer {
     }
 
 
+    /// Slides the viewport camera's view by a drag of (`dx`, `dy`) pixels:
+    /// the scene follows the cursor (right and down are positive).
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        // The camera's own directions, written out from how `eye` places it
+        // so they are always current (not taken from the last frame).
+        let (sin_yaw, cos_yaw) = self.orbit_yaw.sin_cos();
+        let (sin_pitch, cos_pitch) = self.orbit_pitch.sin_cos();
+        let right = glam::Vec3::new(cos_yaw, 0.0, -sin_yaw);
+        let forward = -glam::Vec3::new(cos_pitch * sin_yaw, sin_pitch, cos_pitch * cos_yaw);
+        let up = right.cross(forward);
+        self.orbit_target += pan_offset(
+            self.orbit_distance,
+            std::f32::consts::FRAC_PI_4,
+            self.height as f32,
+            right,
+            up,
+            dx,
+            dy,
+        );
+    }
+
+            /// Whether the viewport looks without perspective (orthographic): things
+    /// far away are as big as near ones, which is what the front, side and
+    /// top views are for.
+    pub fn orthographic(&self) -> bool {
+        self.orthographic
+    }
+
+    pub fn set_orthographic(&mut self, on: bool) {
+        self.orthographic = on;
+    }
+
+    /// Turns the viewport camera to one of the six standard views ("front",
+    /// "back", "right", "left", "top", "bottom") and makes it orthographic, as
+    /// Blender's numpad views do. False, changing nothing, for another name.
+    pub fn set_standard_view(&mut self, name: &str) -> bool {
+        let Some((yaw, pitch)) = standard_view_angles(name) else {
+            return false;
+        };
+        self.orbit_yaw = yaw;
+        self.orbit_pitch = pitch;
+        self.orthographic = true;
+        true
+    }
+
+    /// The viewport camera's up direction (see `camera_up`).
+    fn view_up(&self) -> glam::Vec3 {
+        camera_up(self.orbit_yaw, self.orbit_pitch)
+    }
+
     pub fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
         self.orbit_yaw += delta_yaw;
-        self.orbit_pitch = (self.orbit_pitch + delta_pitch).clamp(-1.5, 1.5);
+        self.orbit_pitch = (self.orbit_pitch + delta_pitch)
+            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
     }
 
     /// Moves the viewport camera to look at the whole of the object at
@@ -1142,11 +1250,29 @@ impl Renderer {
 
         let aspect = self.width as f32 / self.height as f32;
         let mut projection =
-            glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 0.1, 100.0);
+            if self.orthographic {
+                // The window shows what a perspective view shows at the orbited
+                // point (the same size there), as in Blender, whose orthographic
+                // size is the view distance times sensor over lens. The clip range
+                // reaches equally far in front of and behind the camera plane.
+                let half_height = self.orbit_distance * (std::f32::consts::FRAC_PI_4 * 0.5).tan();
+                let half_width = half_height * aspect;
+                let range = (self.orbit_distance * 10.0).max(50.0);
+                glam::Mat4::orthographic_rh(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    -range,
+                    range,
+                )
+            } else {
+                glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 0.1, 100.0)
+            };
 
         let mut target = self.orbit_target;
         let mut eye = self.eye();
-        let mut view_matrix = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+        let mut view_matrix = glam::Mat4::look_at_rh(eye, target, self.view_up());
 
         // Looking through the scene camera instead of the viewport's own.
         if let Some(camera) = self.camera_through() {
@@ -1762,6 +1888,69 @@ mod tests {
     use super::*;
     use crate::scene::light::{Light, LightKind};
     use crate::scene::transform::Transform;
+
+        #[test]
+    fn a_pan_moves_the_scene_by_the_size_of_a_pixel_at_the_orbited_point() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        // Distance 5, a 45 degree view, 800 pixels tall: one pixel is
+        // 2 * 5 * tan(22.5 degrees) / 800 scene units.
+        let one_pixel = 2.0 * 5.0 * (fov * 0.5).tan() / 800.0;
+        let moved = pan_offset(5.0, fov, 800.0, glam::Vec3::X, glam::Vec3::Y, 100.0, 0.0);
+        // The scene follows a drag to the right, so the orbited point goes left.
+        assert!((moved - glam::Vec3::new(-100.0 * one_pixel, 0.0, 0.0)).length() < 1e-6);
+        // Twice as far away, a pixel is worth twice as much.
+        let farther = pan_offset(10.0, fov, 800.0, glam::Vec3::X, glam::Vec3::Y, 100.0, 0.0);
+        assert!((farther.x / moved.x - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_standard_views_look_from_the_six_sides() {
+        let eye_direction = |name: &str| {
+            let (yaw, pitch) = standard_view_angles(name).unwrap();
+            glam::Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos())
+        };
+        let expected = [
+            ("front", glam::Vec3::Z),
+            ("back", -glam::Vec3::Z),
+            ("right", glam::Vec3::X),
+            ("left", -glam::Vec3::X),
+            ("top", glam::Vec3::Y),
+            ("bottom", -glam::Vec3::Y),
+        ];
+        for (name, want) in expected {
+            assert!((eye_direction(name) - want).length() < 1e-5, "{name}");
+        }
+        assert!(standard_view_angles("diagonal").is_none());
+    }
+
+    #[test]
+    fn the_cameras_up_is_defined_even_looking_straight_down() {
+        // Level views keep the world's up on screen.
+        assert!((camera_up(0.7, 0.0) - glam::Vec3::Y).length() < 1e-5);
+        // From above, the front of a model (+Z) is at the bottom of the screen.
+        assert!((camera_up(0.0, std::f32::consts::FRAC_PI_2) + glam::Vec3::Z).length() < 1e-5);
+        // From below, it is at the top.
+        assert!((camera_up(0.0, -std::f32::consts::FRAC_PI_2) - glam::Vec3::Z).length() < 1e-5);
+        // Always a unit vector at a right angle to the way the camera looks.
+        for (yaw, pitch) in [(0.3, 0.4), (2.0, -1.2), (-1.0, 1.57)] {
+            let up = camera_up(yaw, pitch);
+            let look = -glam::Vec3::new(
+                pitch.cos() * yaw.sin(),
+                pitch.sin(),
+                pitch.cos() * yaw.cos(),
+            );
+            assert!((up.length() - 1.0).abs() < 1e-4);
+            assert!(up.dot(look).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn a_pan_down_moves_the_orbited_point_up() {
+    let fov = std::f32::consts::FRAC_PI_4;
+        let moved = pan_offset(5.0, fov, 800.0, glam::Vec3::X, glam::Vec3::Y, 0.0, 50.0);
+        assert!(moved.x.abs() < 1e-9 && moved.z.abs() < 1e-9);
+        assert!(moved.y > 0.0);
+    }
 
     #[test]
     fn the_lights_uniform_matches_the_layout_the_shader_expects() {

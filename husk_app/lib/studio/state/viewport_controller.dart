@@ -39,6 +39,22 @@ class ViewportController {
     rust.orbitCamera(deltaYaw: deltaYaw, deltaPitch: deltaPitch);
   }
 
+
+
+  /// Turns the view to a standard one: front, back, right, left, top or
+  /// bottom (all orthographic). False for any other name.
+  bool standardView(String name) => rust.setStandardView(name: name);
+
+  /// Switches between perspective and orthographic.
+  void toggleOrthographic() {
+    rust.toggleOrthographic();
+  }
+
+  /// Slides the view by a drag of ([dx], [dy]) render pixels.
+  void pan(double dx, double dy) {
+    rust.panCamera(dx: dx, dy: dy);
+  }
+
   /// A factor above 1 moves the camera away, below 1 closer.
   void zoom(double factor) {
     rust.zoomCamera(factor: factor);

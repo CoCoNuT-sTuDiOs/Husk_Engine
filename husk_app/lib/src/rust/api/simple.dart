@@ -167,6 +167,22 @@ List<BigInt?> boneParents() => RustLib.instance.api.crateApiSimpleBoneParents();
 /// start placing bones over from a clean state.
 void resetSkeleton() => RustLib.instance.api.crateApiSimpleResetSkeleton();
 
+/// Turns the viewport to one of the six standard views ("front", "back",
+/// "right", "left", "top" or "bottom"), which are orthographic, as Blender's
+/// numpad views are. False, changing nothing, for any other name.
+bool setStandardView({required String name}) =>
+    RustLib.instance.api.crateApiSimpleSetStandardView(name: name);
+
+/// Switches the viewport between perspective and orthographic (Blender's
+/// numpad 5). Returns whether it is orthographic now.
+bool toggleOrthographic() =>
+    RustLib.instance.api.crateApiSimpleToggleOrthographic();
+
+/// Slides the camera's view by a drag of (dx, dy) render pixels, as with the
+/// middle mouse button and Shift in Blender: the scene follows the cursor.
+void panCamera({required double dx, required double dy}) =>
+    RustLib.instance.api.crateApiSimplePanCamera(dx: dx, dy: dy);
+
 /// Orbits the camera by the given angle deltas (radians) around its
 /// current target. Positive delta_yaw orbits rightward, positive
 /// delta_pitch orbits upward.

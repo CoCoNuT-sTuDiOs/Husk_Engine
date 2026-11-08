@@ -569,6 +569,35 @@ pub fn reset_skeleton() {
     }
     crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
 }
+
+/// Turns the viewport to one of the six standard views ("front", "back",
+/// "right", "left", "top" or "bottom"), which are orthographic, as Blender's
+/// numpad views are. False, changing nothing, for any other name.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_standard_view(name: String) -> bool {
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_standard_view(&name))
+        .unwrap_or(false)
+}
+
+/// Switches the viewport between perspective and orthographic (Blender's
+/// numpad 5). Returns whether it is orthographic now.
+#[flutter_rust_bridge::frb(sync)]
+pub fn toggle_orthographic() -> bool {
+    crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        let on = !renderer.orthographic();
+        renderer.set_orthographic(on);
+        on
+    })
+    .unwrap_or(false)
+}
+
+/// Slides the camera's view by a drag of (dx, dy) render pixels, as with the
+/// middle mouse button and Shift in Blender: the scene follows the cursor.
+#[flutter_rust_bridge::frb(sync)]
+pub fn pan_camera(dx: f64, dy: f64) {
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.pan(dx as f32, dy as f32));
+}
+
 /// Orbits the camera by the given angle deltas (radians) around its
 /// current target. Positive delta_yaw orbits rightward, positive
 /// delta_pitch orbits upward.

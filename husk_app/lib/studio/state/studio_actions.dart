@@ -120,6 +120,19 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
 
   void toggleMaximize() => studio.toggleViewportMaximized();
 
+  /// Turns the viewport to front, back, right, left, top or bottom.
+  void setStandardView(String name) {
+    studio.leaveCameraView();
+    viewport.standardView(name);
+  }
+
+  /// Switches the viewport between perspective and orthographic.
+  void toggleOrthographic() {
+    studio.leaveCameraView();
+    viewport.toggleOrthographic();
+  }
+
+
   // Timeline
 
   void togglePlay(BuildContext context) =>
