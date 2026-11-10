@@ -598,6 +598,23 @@ pub fn pan_camera(dx: f64, dy: f64) {
     crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.pan(dx as f32, dy as f32));
 }
 
+
+#[flutter_rust_bridge::frb(sync)]
+pub fn frame_all() -> bool {
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.frame_all())
+        .unwrap_or(false)
+}
+
+#[flutter_rust_bridge::frb(sync)]
+pub fn frame_selected() -> bool {
+    // The scene knows which object is active; it is asked before the
+    // renderer is locked.
+    let active = crate::scene::object_list().1;
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.frame_object(active))
+        .flatten()
+        .is_some()
+}
+
 /// Orbits the camera by the given angle deltas (radians) around its
 /// current target. Positive delta_yaw orbits rightward, positive
 /// delta_pitch orbits upward.
@@ -711,10 +728,6 @@ pub fn select_object(index: usize) -> bool {
     true
 }
 
-/// Locks or unlocks the object at `index`. A locked object cannot be
-/// clicked in the viewport, moved, rotated, scaled or deleted; it still
-/// draws and plays its animation. False, changing nothing, for an unknown
-/// index.
 #[flutter_rust_bridge::frb(sync)]
 pub fn set_object_locked(index: usize, locked: bool) -> bool {
     crate::scene::set_object_locked(index, locked)

@@ -208,6 +208,51 @@ fn camera_up(yaw: f32, pitch: f32) -> glam::Vec3 {
     right.cross(forward)
 }
 
+
+const FRAME_MARGIN: f32 = 1.4;
+
+/// How far back the viewport camera must stand to fit a sphere of `radius`
+/// in the view so that it just touches the nearer edge of the frame (the
+/// shorter of its height and its width). `fov` is the vertical field of view
+/// in radians and `aspect` is the frame's width over its height. Orthographic
+/// views use the same distance, because Husk's orthographic window shows what
+/// the perspective view shows at the orbited point.
+///
+/// Ported from Blender (SPDX-FileCopyrightText: 2008 Blender Authors,
+/// SPDX-License-Identifier: GPL-2.0-or-later): `ED_view3d_radius_to_dist` in
+/// view3d_utils.cc, called with `use_aspect` on. Blender gets its angle from
+/// the lens and sensor size and then multiplies the distance by the frame's
+/// aspect (turned to at least 1); Husk's view is a fixed angle from top to
+/// bottom, so the fit is worked out from that angle directly.
+fn radius_to_dist(radius: f32, fov: f32, aspect: f32) -> f32 {
+    radius / ((fov * 0.5).tan() * aspect.min(1.0))
+}
+
+/// Where the viewport camera should orbit, and how far back it should stand,
+/// to see a whole box from `low` to `high`: the middle of the box, and far
+/// enough back that a sphere as wide as the box's longest side, plus the
+/// margin, fits the frame. The distance is None (only the target moves) when
+/// the view is orthographic and the box is a single point.
+///
+/// Ported from Blender (SPDX-FileCopyrightText: 2023 Blender Authors,
+/// SPDX-License-Identifier: GPL-2.0-or-later): `view3d_from_minmax` in
+/// view3d_navigate_view_all.cc.
+fn frame_bounds(
+    low: glam::Vec3,
+    high: glam::Vec3,
+    fov: f32,
+    aspect: f32,
+    orthographic: bool,
+) -> (glam::Vec3, Option<f32>) {
+    let target = (low + high) * 0.5;
+    let size = (high - low).max_element();
+    if orthographic && size < 0.0001 {
+        return (target, None);
+    }
+    let distance = radius_to_dist(size * 0.5 * FRAME_MARGIN, fov, aspect);
+    (target, Some(distance))
+}
+
 /// What the ground grid's shader reads: the camera, the camera's distance
 /// from what it looks at, and the colour of the plain grid lines.
 #[repr(C)]
@@ -1154,7 +1199,16 @@ impl Renderer {
     /// `index`: it orbits the middle of that object and stands far enough
     /// back to see all of it. Returns the object's longest side in scene
     /// units, or None if there is no such object or it has no geometry.
-    pub fn frame_object(&mut self, index: usize) -> Option<f32> {
+        pub fn frame_object(&mut self, index: usize) -> Option<f32> {
+        let (low, high) = self.object_bounds(index)?;
+        self.frame_box(low, high);
+        Some((high - low).max_element())
+    }
+
+    /// The box (its lowest and highest corner, in scene units) that holds the
+    /// object at `index` where it is drawn now, in its rest shape. None if
+    /// there is no such object or it has no geometry.
+    fn object_bounds(&self, index: usize) -> Option<(glam::Vec3, glam::Vec3)> {
         let object = self.objects.get(index)?;
         let mut low = glam::Vec3::splat(f32::MAX);
         let mut high = glam::Vec3::splat(f32::MIN);
@@ -1166,13 +1220,45 @@ impl Renderer {
         if low.x > high.x {
             return None;
         }
-        let radius = ((high - low).length() * 0.5).max(0.01);
-        self.orbit_target = (low + high) * 0.5;
-        // The same fit the shape previews use: the whole bounding sphere in
-        // the frame, with a little room around it.
-        self.orbit_distance =
-            (radius / (std::f32::consts::FRAC_PI_4 * 0.5).sin() * 1.2).clamp(0.3, 500.0);
-        Some((high - low).max_element())
+        Some((low, high))
+    }
+
+    /// Points the viewport camera at a box (see `frame_bounds`). The distance
+    /// is held between 0.3 and 500, the same limits `zoom` uses, so the next
+    /// zoom does not make the view jump.
+    fn frame_box(&mut self, low: glam::Vec3, high: glam::Vec3) {
+        let aspect = self.width as f32 / self.height as f32;
+        let (target, distance) = frame_bounds(
+            low,
+            high,
+            std::f32::consts::FRAC_PI_4,
+            aspect,
+            self.orthographic,
+        );
+        self.orbit_target = target;
+        if let Some(distance) = distance {
+            self.orbit_distance = distance.clamp(0.3, 500.0);
+        }
+    }
+
+    /// Moves the viewport camera to look at every object that has geometry
+    /// (Blender's Frame All, the Home key). False, changing nothing, if no
+    /// object has any.
+    pub fn frame_all(&mut self) -> bool {
+        let mut low = glam::Vec3::splat(f32::MAX);
+        let mut high = glam::Vec3::splat(f32::MIN);
+        let mut any = false;
+        for index in 0..self.objects.len() {
+            if let Some((object_low, object_high)) = self.object_bounds(index) {
+                low = low.min(object_low);
+                high = high.max(object_high);
+                any = true;
+            }
+        }
+        if any {
+            self.frame_box(low, high);
+        }
+        any
     }
 
     /// Moves the camera closer (a factor below 1) or farther away (above 1),
@@ -1953,8 +2039,55 @@ mod tests {
     }
 
     #[test]
+    fn framing_fits_the_box_in_the_shorter_side_of_the_frame_with_blenders_margin() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let low = glam::Vec3::splat(-1.0);
+        let high = glam::Vec3::splat(1.0);
+        // A box 2 across: Blender fits a sphere of radius 1 * 1.4 = 1.4, which
+        // must just touch the nearer edge of the frame, wide, square or tall.
+        for aspect in [16.0 / 9.0, 1.0, 0.5] {
+            let (target, distance) = frame_bounds(low, high, fov, aspect, false);
+            assert!(target.length() < 1e-6);
+            let half_height = distance.unwrap() * (fov * 0.5).tan();
+            let half_width = half_height * aspect;
+            assert!((half_height.min(half_width) - 1.4).abs() < 1e-4);
+        }
+        // Perspective and orthographic views stand at the same distance.
+        let perspective = frame_bounds(low, high, fov, 1.5, false).1.unwrap();
+        let orthographic = frame_bounds(low, high, fov, 1.5, true).1.unwrap();
+        assert!((perspective - orthographic).abs() < 1e-6);
+    }
+
+    #[test]
+    fn framing_goes_by_the_longest_side_of_the_box_not_its_diagonal() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let (target, distance) = frame_bounds(
+            glam::Vec3::ZERO,
+            glam::Vec3::new(4.0, 1.0, 1.0),
+            fov,
+            1.0,
+            false,
+        );
+        assert!((target - glam::Vec3::new(2.0, 0.5, 0.5)).length() < 1e-6);
+        // Longest side 4, so a sphere of radius 2 * 1.4 = 2.8.
+        let expected = 2.8 / (fov * 0.5).tan();
+        assert!((distance.unwrap() - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn an_orthographic_view_of_a_single_point_moves_but_does_not_zoom() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let point = glam::Vec3::new(1.0, 2.0, 3.0);
+        let (target, distance) = frame_bounds(point, point, fov, 1.5, true);
+        assert_eq!(target, point);
+        assert!(distance.is_none());
+        // A perspective view still gets a distance.
+        assert!(frame_bounds(point, point, fov, 1.5, false).1.is_some());
+    }
+
+    #[test]
     fn the_lights_uniform_matches_the_layout_the_shader_expects() {
-        // 16 bytes of count, then eight lights of three vec4s each.
+    // 16 bytes of count, then eight lights of three vec4s each.
         assert_eq!(std::mem::size_of::<GpuLight>(), 48);
         assert_eq!(std::mem::size_of::<LightsUniform>(), 16 + 8 * 48);
     }

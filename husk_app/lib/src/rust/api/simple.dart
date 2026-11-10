@@ -183,6 +183,16 @@ bool toggleOrthographic() =>
 void panCamera({required double dx, required double dy}) =>
     RustLib.instance.api.crateApiSimplePanCamera(dx: dx, dy: dy);
 
+/// Moves the viewport camera to see every object that has geometry, as
+/// Blender's Frame All (the Home key) does. Returns false, changing nothing,
+/// when no object has any.
+bool frameAll() => RustLib.instance.api.crateApiSimpleFrameAll();
+
+/// Moves the viewport camera to see the active object, as Blender's Frame
+/// Selected (the numpad period key) does. Returns false, changing nothing,
+/// when the active object has no geometry.
+bool frameSelected() => RustLib.instance.api.crateApiSimpleFrameSelected();
+
 /// Orbits the camera by the given angle deltas (radians) around its
 /// current target. Positive delta_yaw orbits rightward, positive
 /// delta_pitch orbits upward.

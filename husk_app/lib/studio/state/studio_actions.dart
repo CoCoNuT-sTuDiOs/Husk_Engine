@@ -126,6 +126,21 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
     viewport.standardView(name);
   }
 
+  /// Moves the viewport to see every object, as Blender's Frame All does.
+  void frameAll(BuildContext context) {
+    studio.leaveCameraView();
+    if (!viewport.frameAll()) showMessage(context, 'Nothing to frame');
+  }
+
+  /// Moves the viewport to see the active object, as Blender's Frame
+  /// Selected does.
+  void frameSelected(BuildContext context) {
+    studio.leaveCameraView();
+    if (!viewport.frameSelected()) {
+      showMessage(context, 'The active object has no shape to frame');
+    }
+  }
+
   /// Switches the viewport between perspective and orthographic.
   void toggleOrthographic() {
     studio.leaveCameraView();

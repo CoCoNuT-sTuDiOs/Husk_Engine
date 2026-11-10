@@ -113,8 +113,19 @@ class StudioTopBar extends StatelessWidget {
                           trailingIcon: _shortcut('Ctrl+Space'),
                           onPressed: actions.toggleMaximize,
                           child: Text(
-                                                        maximized ? 'Restore panels' : 'Maximize viewport',
+                           maximized ? 'Restore panels' : 'Maximize viewport',
                           ),
+                        ),
+                        const Divider(height: 8),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Home'),
+                          onPressed: () => actions.frameAll(context),
+                          child: const Text('Frame All'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Numpad .'),
+                          onPressed: () => actions.frameSelected(context),
+                          child: const Text('Frame Selected'),
                         ),
                         const Divider(height: 8),
                         MenuItemButton(

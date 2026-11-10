@@ -102,9 +102,6 @@ class _ViewportPaneState extends State<ViewportPane> {
     });
   }
 
-  /// Works out the render size for the panel (physical pixels, capped) and
-  /// asks the engine for it. The first request goes straight away; later
-  /// ones wait until the panel has stopped changing.
   void _requestSize(Size paneSize, double pixelRatio) {
     var width = paneSize.width * pixelRatio;
     var height = paneSize.height * pixelRatio;
@@ -171,9 +168,6 @@ class _ViewportPaneState extends State<ViewportPane> {
     return false;
   }
 
-  /// Blender's numpad views: 1 front, 3 right, 7 top, and with Ctrl the
-  /// opposite side. The top-row digits do the same (a laptop has no numpad),
-  /// and 5 switches between perspective and orthographic.
   bool _handleViewKey(LogicalKeyboardKey key) {
     final opposite = HardwareKeyboard.instance.isControlPressed;
     String? view;
@@ -188,6 +182,13 @@ class _ViewportPaneState extends State<ViewportPane> {
     } else if (key == LogicalKeyboardKey.digit5 ||
         key == LogicalKeyboardKey.numpad5) {
       widget.actions.toggleOrthographic();
+      return true;
+    } else if (key == LogicalKeyboardKey.home) {
+      widget.actions.frameAll(context);
+      return true;
+    } else if (key == LogicalKeyboardKey.numpadDecimal ||
+        key == LogicalKeyboardKey.period) {
+      widget.actions.frameSelected(context);
       return true;
     }
     if (view == null) return false;
@@ -372,10 +373,6 @@ class _ViewportPaneState extends State<ViewportPane> {
     );
   }
 
-  /// Starts a drag on a scale handle if the pointer is on one; otherwise
-  /// the drag orbits the camera as usual. The arrows run along the object's
-  /// own axes: scaling along a scene axis would shear a rotated object,
-  /// which an object transform cannot hold.
   void _beginScaleDrag(Offset pointer, double scale) {
     if (_studio.activeLocked) return;
     final position = _studio.activeTransform.position;

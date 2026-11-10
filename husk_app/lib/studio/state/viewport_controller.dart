@@ -55,6 +55,15 @@ class ViewportController {
     rust.panCamera(dx: dx, dy: dy);
   }
 
+
+  /// Moves the view to see every object that has a shape (Blender's Frame
+  /// All). False, changing nothing, when there is nothing to frame.
+  bool frameAll() => rust.frameAll();
+
+  /// Moves the view to see the active object (Blender's Frame Selected).
+  /// False, changing nothing, when it has no shape to frame.
+  bool frameSelected() => rust.frameSelected();
+
   /// A factor above 1 moves the camera away, below 1 closer.
   void zoom(double factor) {
     rust.zoomCamera(factor: factor);
@@ -148,10 +157,6 @@ class ViewportController {
     return axes;
   }
 
-  /// The gizmo arrow under [pointer] (panel pixels), if any: 0 = X, 1 = Y,
-  /// 2 = Z. [scale] converts render pixels to panel pixels, and
-  /// [length] is how long the arrows are drawn in panel pixels. An arrow
-  /// that points straight at the camera has no length and cannot be hit.
   int? gizmoAxisAt(
     Offset pointer,
     (double, double, double) position,
@@ -177,9 +182,6 @@ class ViewportController {
     return best;
   }
 
-  /// How far along gizmo axis [axis] (0 = X, 1 = Y, 2 = Z), measured from
-  /// [position], the cursor at render pixel (x, y) falls. Null when the
-  /// cursor ray runs parallel to the axis.
   double? axisParam(
     (double, double, double) position,
     int axis,
@@ -204,11 +206,6 @@ class ViewportController {
     return axes.isEmpty ? null : axes.first.start;
   }
 
-  /// The scale handle under [pointer] (panel pixels), if any: 0 = X, 1 = Y,
-  /// 2 = Z along the object's own axes [directions], or
-  /// [uniformScaleHandle] for the centre box, which wins where it overlaps
-  /// an arrow. [scale] converts render pixels to panel pixels, and [length]
-  /// is how long the arrows are drawn, in panel pixels.
   int? scaleHandleAt(
     Offset pointer,
     (double, double, double) position,
