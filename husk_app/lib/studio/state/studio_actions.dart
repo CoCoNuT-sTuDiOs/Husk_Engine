@@ -5,6 +5,7 @@ import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:husk_app/ui/shortcuts_manual.dart';
 
 /// The commands a user can trigger from menus, panels, headers and
 /// shortcuts. Each one lives here once, so every place that offers it
@@ -119,6 +120,26 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
   // View
 
   void toggleMaximize() => studio.toggleViewportMaximized();
+
+  // Help
+
+  bool _shortcutsOpen = false;
+
+  /// Whether the shortcuts manual is on screen. While it is, the window's
+  /// key handlers leave the keys alone, so Delete or Space do nothing to the
+  /// scene behind it.
+  bool get shortcutsOpen => _shortcutsOpen;
+
+  /// Opens the shortcuts manual (Help > Keyboard Shortcuts, Ctrl+/).
+  Future<void> showShortcuts(BuildContext context) async {
+    if (_shortcutsOpen) return;
+    _shortcutsOpen = true;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => const ShortcutsDialog(),
+    );
+    _shortcutsOpen = false;
+  }
 
   /// Turns the viewport to front, back, right, left, top or bottom.
   void setStandardView(String name) {

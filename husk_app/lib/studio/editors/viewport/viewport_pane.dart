@@ -146,6 +146,8 @@ class _ViewportPaneState extends State<ViewportPane> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
     // A text box has the keys: Delete, - and = belong to it.
     if (isTyping()) return false;
+    // So does the shortcuts manual while it is open.
+    if (widget.actions.shortcutsOpen) return false;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.minus ||
         key == LogicalKeyboardKey.numpadSubtract) {

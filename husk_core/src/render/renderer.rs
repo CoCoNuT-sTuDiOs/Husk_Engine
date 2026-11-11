@@ -196,6 +196,19 @@ fn standard_view_angles(name: &str) -> Option<(f32, f32)> {
     }
 }
 
+/// Whether the viewport is orthographic after the view has been rotated. A
+/// standard view (front, top and so on) is orthographic, and turning it
+/// goes back to perspective, but an orthographic view that was switched on by
+/// hand (the 5 key) while looking from any other angle stays orthographic.
+///
+/// Ported from Blender (SPDX-FileCopyrightText: 2008 Blender Authors,
+/// SPDX-License-Identifier: GPL-2.0-or-later): `ED_view3d_persp_ensure` in
+/// view3d_utils.cc, the action Blender takes when the view is rotated. Husk
+/// follows it as if Blender's "Auto Perspective" preference were on.
+fn orthographic_after_rotating(orthographic: bool, axis_view: bool) -> bool {
+    orthographic && !axis_view
+}
+
 /// The up direction of the viewport camera for a yaw and pitch. Unlike a
 /// fixed world "up" it stays defined when the camera looks straight down or
 /// up (the top and bottom views): from above it points towards the back of
@@ -356,9 +369,12 @@ pub struct Renderer {
     orbit_yaw: f32,
     orbit_pitch: f32,
     orbit_distance: f32,
-        orbit_target: glam::Vec3,
     /// Whether the viewport looks without perspective (see `orthographic`).
     orthographic: bool,
+    /// Whether the viewport is looking exactly down one of the six standard
+    /// views (front, back, right, left, top, bottom). Orbiting ends it.
+    axis_view: bool,
+    orbit_target: glam::Vec3,
     scene_camera: Option<CameraView>,
         camera_view_on: bool,
     grid_pipeline: wgpu::RenderPipeline,
@@ -817,6 +833,7 @@ impl Renderer {
             orbit_distance: 3.354_102,
              orbit_target,
             orthographic: false,
+            axis_view: false,
             scene_camera: None,
             camera_view_on: false,
             grid_pipeline,
@@ -1181,6 +1198,7 @@ impl Renderer {
         self.orbit_yaw = yaw;
         self.orbit_pitch = pitch;
         self.orthographic = true;
+        self.axis_view = true;
         true
     }
 
@@ -1190,6 +1208,14 @@ impl Renderer {
     }
 
     pub fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
+        // Turning the view takes it out of a standard view, and back to
+        // perspective if that view was orthographic (see
+        // `orthographic_after_rotating`).
+        if delta_yaw != 0.0 || delta_pitch != 0.0 {
+            self.orthographic =
+                orthographic_after_rotating(self.orthographic, self.axis_view);
+            self.axis_view = false;
+        }
         self.orbit_yaw += delta_yaw;
         self.orbit_pitch = (self.orbit_pitch + delta_pitch)
             .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
@@ -2010,8 +2036,54 @@ mod tests {
     }
 
     #[test]
+    fn turning_a_standard_view_returns_to_perspective_but_a_hand_made_orthographic_view_stays() {
+        // A standard view is orthographic, and turning it leaves orthographic.
+        assert!(!orthographic_after_rotating(true, true));
+        // Orthographic switched on by hand from another angle stays as it is.
+        assert!(orthographic_after_rotating(true, false));
+        // Perspective stays perspective either way.
+        assert!(!orthographic_after_rotating(false, true));
+        assert!(!orthographic_after_rotating(false, false));
+    }
+
+    #[test]
+    fn the_standard_views_match_blenders_own_view_rotations() {
+        // Blender's `view3d_quat_axis` (view3d_utils.cc): the entry with no
+        // roll for each view, as (w, x, y, z).
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        let blender = [
+            ("front", [s, -s, 0.0, 0.0]),
+            ("back", [0.0, 0.0, -s, -s]),
+            ("left", [0.5, -0.5, 0.5, 0.5]),
+            ("right", [0.5, -0.5, -0.5, -0.5]),
+            ("top", [1.0, 0.0, 0.0, 0.0]),
+            ("bottom", [0.0, -1.0, 0.0, 0.0]),
+        ];
+        // Blender's world is Z-up and its models face -Y. Husk's is Y-up and
+        // its models face +Z, as in glTF, whose importer sends a point
+        // (x, y, z) to Blender's (x, -z, y). The way back is (x, z, -y).
+        let to_husk = |v: glam::Vec3| glam::Vec3::new(v.x, v.z, -v.y);
+        for (name, [w, x, y, z]) in blender {
+            // The rotation takes the world into view space, where the camera
+            // looks along -Z with +Y up. Its inverse gives the camera's back
+            // and up directions in the world.
+            let view = glam::Quat::from_xyzw(x, y, z, w);
+            let eye_direction = to_husk(view.inverse() * glam::Vec3::Z);
+            let up = to_husk(view.inverse() * glam::Vec3::Y);
+            let (yaw, pitch) = standard_view_angles(name).unwrap();
+            let husk_eye = glam::Vec3::new(
+                pitch.cos() * yaw.sin(),
+                pitch.sin(),
+                pitch.cos() * yaw.cos(),
+            );
+            assert!((eye_direction - husk_eye).length() < 1e-5, "{name}: eye");
+            assert!((up - camera_up(yaw, pitch)).length() < 1e-5, "{name}: up");
+        }
+    }
+
+    #[test]
     fn the_cameras_up_is_defined_even_looking_straight_down() {
-        // Level views keep the world's up on screen.
+    // Level views keep the world's up on screen.
         assert!((camera_up(0.7, 0.0) - glam::Vec3::Y).length() < 1e-5);
         // From above, the front of a model (+Z) is at the bottom of the screen.
         assert!((camera_up(0.0, std::f32::consts::FRAC_PI_2) + glam::Vec3::Z).length() < 1e-5);

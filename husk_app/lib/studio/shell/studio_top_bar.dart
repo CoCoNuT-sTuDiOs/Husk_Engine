@@ -170,6 +170,16 @@ class StudioTopBar extends StatelessWidget {
                       ],
                       child: const Text('View'),
                     ),
+                    SubmenuButton(
+                      menuChildren: [
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+/'),
+                          onPressed: () => actions.showShortcuts(context),
+                          child: const Text('Keyboard Shortcuts'),
+                        ),
+                      ],
+                      child: const Text('Help'),
+                    ),
                   ],
                 );
               },

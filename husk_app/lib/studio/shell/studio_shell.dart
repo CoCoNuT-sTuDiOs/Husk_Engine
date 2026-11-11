@@ -65,6 +65,9 @@ class _StudioShellState extends State<StudioShell> {
   /// The window-wide shortcuts. Each one runs the same command as its menu
   /// entry.
   bool _handleKey(KeyEvent event) {
+    // While the shortcuts manual is open it has the keys: Delete, Space and
+    // the number keys must not act on the scene behind it.
+    if (_actions.shortcutsOpen) return false;
 // Space on its own plays and pauses the animation (Ctrl+Space, below,
     // maximizes the viewport).
     if (event is KeyDownEvent &&
@@ -91,8 +94,13 @@ class _StudioShellState extends State<StudioShell> {
       _actions.load(context);
       return true;
     }
-    if (key == LogicalKeyboardKey.space) {
+        if (key == LogicalKeyboardKey.space) {
       _actions.toggleMaximize();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.slash ||
+        key == LogicalKeyboardKey.numpadDivide) {
+      _actions.showShortcuts(context);
       return true;
     }
     return false;
