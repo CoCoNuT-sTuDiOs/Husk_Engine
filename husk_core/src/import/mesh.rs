@@ -317,20 +317,123 @@ fn remap_vertex_weights(
     })
 }
 
-/// Loads the first mesh primitive found in a glTF or GLB file into Husk's
-/// own MeshData format. Returns an error string on any failure missing
+/// Every node of the file's scene that has a mesh, paired with its world
+/// matrix: its own matrix (the file's matrix, or its position, rotation and
+/// scale) on top of its parent's, all the way up. A node whose world matrix
+/// flattens everything (a zero scale) is left out, since it shows nothing. A
+/// file with no scene uses every node that has no parent. A node reached
+/// twice (a loop, which the glTF specification forbids) is an error.
+fn placed_mesh_nodes(
+    document: &gltf::Document,
+) -> Result<Vec<(gltf::Node<'_>, glam::Mat4)>, String> {
+    let node_count = document.nodes().count();
+    let mut stack: Vec<(gltf::Node<'_>, glam::Mat4)> = Vec::new();
+    match document.default_scene().or_else(|| document.scenes().next()) {
+        Some(scene) => {
+            for node in scene.nodes() {
+                stack.push((node, glam::Mat4::IDENTITY));
+            }
+        }
+        None => {
+            let mut has_parent = vec![false; node_count];
+            for node in document.nodes() {
+                for child in node.children() {
+                    has_parent[child.index()] = true;
+                }
+            }
+            for node in document.nodes() {
+                if !has_parent[node.index()] {
+                    stack.push((node, glam::Mat4::IDENTITY));
+                }
+            }
+        }
+    }
+
+    let mut visited = vec![false; node_count];
+    let mut placed = Vec::new();
+    while let Some((node, parent_world)) = stack.pop() {
+        if std::mem::replace(&mut visited[node.index()], true) {
+            return Err(format!(
+                "Node {} appears twice in this glTF file's node tree",
+                node.index()
+            ));
+        }
+        let world = parent_world * glam::Mat4::from_cols_array_2d(&node.transform().matrix());
+        for child in node.children() {
+            stack.push((child, world));
+        }
+        if node.mesh().is_some() && world.determinant() != 0.0 && world.is_finite() {
+            placed.push((node, world));
+        }
+    }
+    Ok(placed)
+}
+
+/// Moves a mesh's geometry into the scene by a node's world matrix: points
+/// are moved by the matrix, and normals by its inverse transpose so they stay
+/// at right angles to the surface under any scale, then made unit length
+/// again. A matrix that mirrors the mesh (a negative scale) turns its
+/// triangles inside out, so their winding is reversed, as the glTF
+/// specification says.
+fn place_geometry(
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    mut indices: Vec<u32>,
+    world: &glam::Mat4,
+) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
+    let linear = glam::Mat3::from_mat4(*world);
+    let normal_matrix = linear.inverse().transpose();
+    let positions: Vec<[f32; 3]> = positions
+        .into_iter()
+        .map(|p| world.transform_point3(glam::Vec3::from(p)).to_array())
+        .collect();
+    let normals: Vec<[f32; 3]> = normals
+        .into_iter()
+        .map(|n| {
+            (normal_matrix * glam::Vec3::from(n))
+                .normalize_or_zero()
+                .to_array()
+        })
+        .collect();
+    if linear.determinant() < 0.0 {
+        for triangle in indices.chunks_exact_mut(3) {
+            triangle.swap(1, 2);
+        }
+    }
+    (positions, normals, indices)
+}
+
+/// Loads every mesh in a glTF or GLB file's scene into Husk's own MeshData
+/// format, combined into one mesh and placed where the file's nodes put them
+/// (see `mesh_from_gltf`). Returns an error string on any failure: missing
 /// file, malformed glTF, or a primitive missing positions/normals/indices.
 pub fn load_gltf(path: &str, max_triangles: usize) -> Result<MeshData, String> {
     let (document, buffers, _images) =
         gltf::import(path).map_err(|e| format!("Failed to parse glTF: {e}"))?;
+    mesh_from_gltf(&document, &buffers, max_triangles)
+}
+
+/// The parsing half of `load_gltf`, split out so tests can feed it a glTF
+/// built in memory. Every mesh is placed where the file's node tree puts it:
+/// each node's matrix is applied on top of its parent's, as the glTF 2.0
+/// specification says, and a mesh used by two nodes appears twice.
+pub fn mesh_from_gltf(
+    document: &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    max_triangles: usize,
+) -> Result<MeshData, String> {
+    let placed = placed_mesh_nodes(document)?;
 
     // First pass: sum the total triangle count across every mesh primitive
-    // in the file, using cheap accessor metadata only — no buffer decode —
+// in the file, using cheap accessor metadata only — no buffer decode —
     // so an oversized combined mesh is rejected before any real processing.
     let mut total_triangles = 0usize;
-    for mesh in document.meshes() {
+    for (node, _) in &placed {
+        let Some(mesh) = node.mesh() else {
+            continue;
+        };
         for primitive in mesh.primitives() {
-            if let Some(indices_accessor) = primitive.indices() {
+        if let Some(indices_accessor) = primitive.indices() {
                 total_triangles += indices_accessor.count() / 3;
             }
         }
@@ -350,7 +453,10 @@ pub fn load_gltf(path: &str, max_triangles: usize) -> Result<MeshData, String> {
     // in the combined buffer.
     let mut combined = MeshData::default();
 
-    for mesh in document.meshes() {
+    for (node, world) in &placed {
+        let Some(mesh) = node.mesh() else {
+            continue;
+        };
         for primitive in mesh.primitives() {
             let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
             let mesh_name = mesh.name().unwrap_or("(unnamed)");
@@ -371,6 +477,7 @@ pub fn load_gltf(path: &str, max_triangles: usize) -> Result<MeshData, String> {
                 .into_u32()
                 .collect();
 
+            let (positions, normals, indices) = place_geometry(positions, normals, indices, world);
             let index_offset = combined.positions.len() as u32;
 
             combined.positions.extend(positions);
@@ -386,4 +493,135 @@ pub fn load_gltf(path: &str, max_triangles: usize) -> Result<MeshData, String> {
     }
 
     Ok(combined)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A glTF with one triangle, built in memory: the points (0,0,0), (1,0,0)
+    // and (0,1,0), all with their normals along +Z. The start and end of the
+    // file are fixed; each test writes the middle, which holds the scenes and
+    // nodes that say where the triangle's mesh is placed.
+    const FILE_START: &str = r#"{"asset":{"version":"2.0"},"#;
+    const FILE_END: &str = r#","meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2}]}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]},{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},{"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":36},{"buffer":0,"byteOffset":72,"byteLength":6}],"buffers":[{"uri":"triangle.bin","byteLength":78}]}"#;
+
+    fn triangle_buffers() -> Vec<gltf::buffer::Data> {
+        let mut bytes: Vec<u8> = Vec::new();
+        for value in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        for _ in 0..3 {
+            for value in [0.0f32, 0.0, 1.0] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        for index in [0u16, 1, 2] {
+            bytes.extend_from_slice(&index.to_le_bytes());
+        }
+        vec![gltf::buffer::Data(bytes)]
+    }
+
+    fn load(nodes_and_scenes: &str) -> Result<MeshData, String> {
+        let json = format!("{FILE_START}{nodes_and_scenes}{FILE_END}");
+        let file = gltf::Gltf::from_slice(json.as_bytes()).expect("the test glTF should parse");
+        mesh_from_gltf(&file.document, &triangle_buffers(), 1000)
+    }
+
+    fn close(a: [f32; 3], b: [f32; 3]) -> bool {
+        (glam::Vec3::from(a) - glam::Vec3::from(b)).length() < 1e-4
+    }
+
+    #[test]
+    fn a_matrix_moves_points_and_turns_normals() {
+        let world = glam::Mat4::from_translation(glam::Vec3::new(10.0, 0.0, 0.0))
+            * glam::Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)
+            * glam::Mat4::from_scale(glam::Vec3::splat(2.0));
+        let (positions, normals, indices) = place_geometry(
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![[0.0, 0.0, 1.0]; 3],
+            vec![0, 1, 2],
+            &world,
+        );
+        // Twice as big, a quarter turn about Y (which sends +X to -Z), then
+        // 10 along X.
+        assert!(close(positions[0], [10.0, 0.0, 0.0]));
+        assert!(close(positions[1], [10.0, 0.0, -2.0]));
+        assert!(close(positions[2], [10.0, 2.0, 0.0]));
+        // A quarter turn sends +Z to +X, and the size does not change a
+        // normal's length.
+        assert!(close(normals[0], [1.0, 0.0, 0.0]));
+        assert_eq!(indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn a_mirrored_matrix_turns_the_triangles_inside_out() {
+        let world = glam::Mat4::from_scale(glam::Vec3::new(-1.0, 1.0, 1.0));
+        let (positions, normals, indices) = place_geometry(
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![[0.0, 0.0, 1.0]; 3],
+            vec![0, 1, 2],
+            &world,
+        );
+        assert!(close(positions[1], [-1.0, 0.0, 0.0]));
+        // The surface still faces the same way.
+        assert!(close(normals[0], [0.0, 0.0, 1.0]));
+        // Mirroring reverses the winding, so the triangle is listed the other
+        // way round.
+        assert_eq!(indices, vec![0, 2, 1]);
+    }
+
+    #[test]
+    fn a_meshs_node_and_its_parents_place_it_in_the_scene() {
+        // The parent moves 10 along X. Its child, which holds the mesh, is
+        // turned a quarter turn about Y and made twice as big.
+        let mesh = load(
+            r#""scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"translation":[10.0,0.0,0.0],"children":[1]},{"mesh":0,"rotation":[0.0,0.7071068,0.0,0.7071068],"scale":[2.0,2.0,2.0]}]"#,
+        )
+        .unwrap();
+        assert_eq!(mesh.positions.len(), 3);
+        assert!(close(mesh.positions[0], [10.0, 0.0, 0.0]));
+        assert!(close(mesh.positions[1], [10.0, 0.0, -2.0]));
+        assert!(close(mesh.positions[2], [10.0, 2.0, 0.0]));
+        assert!(close(mesh.normals[0], [1.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn a_mesh_used_by_two_nodes_appears_twice() {
+        let mesh = load(
+            r#""scene":0,"scenes":[{"nodes":[0,1]}],"nodes":[{"mesh":0},{"mesh":0,"translation":[5.0,0.0,0.0]}]"#,
+        )
+        .unwrap();
+        assert_eq!(mesh.positions.len(), 6);
+        assert_eq!(mesh.triangle_count(), 2);
+        // One copy sits at the origin and the other 5 along X, in either order.
+        let mut starts = [mesh.positions[0][0], mesh.positions[3][0]];
+        starts.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(starts, [0.0, 5.0]);
+        // The second copy's triangle points at the second copy's vertices.
+        assert_eq!(&mesh.indices[3..], &[3, 4, 5]);
+    }
+
+    #[test]
+    fn a_file_without_a_scene_places_the_nodes_that_have_no_parent() {
+        // Node 1 is node 0's child, so it is placed once, through its parent,
+        // and not a second time as if it were a top-level node.
+        let mesh = load(
+            r#""nodes":[{"mesh":0,"children":[1]},{"mesh":0,"translation":[5.0,0.0,0.0]}]"#,
+        )
+        .unwrap();
+        assert_eq!(mesh.triangle_count(), 2);
+    }
+
+    #[test]
+    fn a_node_tree_that_loops_is_refused_instead_of_hanging() {
+        let middle =
+            r#""scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0,"children":[1]},{"children":[0]}]"#;
+        let json = format!("{FILE_START}{middle}{FILE_END}");
+        // The file may be refused when it is parsed or when its nodes are
+        // walked; either way it must not hang or load.
+        if let Ok(file) = gltf::Gltf::from_slice(json.as_bytes()) {
+            assert!(mesh_from_gltf(&file.document, &triangle_buffers(), 1000).is_err());
+        }
+    }
 }

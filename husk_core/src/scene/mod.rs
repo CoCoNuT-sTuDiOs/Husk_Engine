@@ -8,7 +8,7 @@ use crate::animation::channels::{Channels, Interpolation, Property, Value};
 use crate::rig::Skeleton;
 use crate::rig::skinning::VertexWeights;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, TryLockError};
 
 /// What kind of thing an object is. A mesh is drawn as geometry; a camera
 /// is drawn as a small camera shape and carries a lens.
@@ -601,7 +601,45 @@ pub struct Project {
     pub active_scene: usize,
 }
 
-static PROJECT: Mutex<Project> = Mutex::new(Project {
+/// A lock that keeps working after a panic. A std `Mutex` is "poisoned" when
+/// a thread panics while holding it, and from then on every `lock()` fails,
+/// so one failed call would make every later call fail too and the whole
+/// program would look dead. This one hands the data back anyway, so a single
+/// failed call stays a single failed call. (The data may be half-changed by
+/// the call that panicked, which is the lesser problem.)
+///
+/// `lock` returns a `Result` that can never be an error, so `.lock().unwrap()`
+/// calls keep working and can no longer panic.
+pub struct RecoveringMutex<T> {
+    inner: Mutex<T>,
+}
+
+impl<T> RecoveringMutex<T> {
+    pub const fn new(value: T) -> Self {
+        Self {
+            inner: Mutex::new(value),
+        }
+    }
+
+    /// Waits for the lock.
+    pub fn lock(&self) -> Result<MutexGuard<'_, T>, std::convert::Infallible> {
+        Ok(self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+    }
+
+    /// Takes the lock if it is free right now, or None if someone holds it.
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        match self.inner.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        }
+    }
+}
+
+static PROJECT: RecoveringMutex<Project> = RecoveringMutex::new(Project {
     scenes: Vec::new(),
     active_scene: 0,
 });
@@ -1607,5 +1645,36 @@ mod smooth_key_tests {
         // The middle is still the middle.
         assert!(object.apply_channels(1.0));
         assert!((object.transform.translation.x - 2.0).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod recovering_mutex_tests {
+    use super::*;
+
+    #[test]
+    fn a_recovering_mutex_keeps_working_after_a_panic_while_it_was_held() {
+        let mutex = std::sync::Arc::new(RecoveringMutex::new(5));
+        let held = mutex.clone();
+        let result = std::thread::spawn(move || {
+            let _guard = held.lock().unwrap();
+            panic!("a panic while the lock is held");
+        })
+        .join();
+        assert!(result.is_err());
+        // A plain std Mutex would now refuse every lock; this one hands the
+        // value back.
+        assert_eq!(*mutex.lock().unwrap(), 5);
+        assert!(mutex.try_lock().is_some());
+    }
+
+    #[test]
+    fn try_lock_gives_up_while_the_lock_is_held() {
+        let mutex = RecoveringMutex::new(1);
+        {
+            let _held = mutex.lock().unwrap();
+            assert!(mutex.try_lock().is_none());
+        }
+        assert!(mutex.try_lock().is_some());
     }
 }

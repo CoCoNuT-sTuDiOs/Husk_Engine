@@ -1,7 +1,20 @@
 use crate::render::renderer::Renderer;
-use std::sync::Mutex;
+use crate::scene::RecoveringMutex;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-static ACTIVE_RENDERER: Mutex<Option<usize>> = Mutex::new(None);
+static ACTIVE_RENDERER: RecoveringMutex<Option<usize>> = RecoveringMutex::new(None);
+
+/// Whether the last frame could not be drawn, so the problem is said once
+/// and not sixty times a second.
+static FRAME_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Runs `f`, giving back None if it panics. A panic that leaves an
+/// `extern "C"` function closes the whole program, so every exported function
+/// that can panic (the graphics code can) runs its work through this.
+fn run_guarded<R>(f: impl FnOnce() -> R) -> Option<R> {
+    catch_unwind(AssertUnwindSafe(f)).ok()
+}
 
 /// Runs `f` with a reference to the currently active renderer, if one
 /// exists. Returns `None` if no renderer has been created (or it has
@@ -26,11 +39,22 @@ pub(crate) fn with_active_renderer_mut<R>(f: impl FnOnce(&mut Renderer) -> R) ->
 /// `husk_renderer_destroy` when done.
 #[unsafe(no_mangle)]
 pub extern "C" fn husk_renderer_create(width: u32, height: u32) -> *mut Renderer {
-
+    // A switch for testing the failure path: with HUSK_SIMULATE_NO_GPU set,
+    // the graphics "fail to start" and the viewport stays empty.
+    if std::env::var_os("HUSK_SIMULATE_NO_GPU").is_some() {
+        eprintln!("Husk: HUSK_SIMULATE_NO_GPU is set, so the graphics are not started");
+        return std::ptr::null_mut();
+    }
     // The scene starts empty. Models come in through File > Import GLB, not
     // from a path baked into the program.
     let mesh = crate::geometry::mesh::MeshData::default();
-    let renderer = Box::new(Renderer::new(width, height, mesh));
+    // A graphics failure here (no usable GPU, no memory) is a panic. Give
+    // back a null handle instead of closing the program.
+    let Some(renderer) = run_guarded(|| Renderer::new(width, height, mesh)) else {
+        eprintln!("Husk: the graphics could not be started, so the viewport stays empty");
+        return std::ptr::null_mut();
+    };
+    let renderer = Box::new(renderer);
     // The outliner calls the loaded model "Model".
     crate::scene::active_object().name = String::from("Model");
     let raw = Box::into_raw(renderer);
@@ -51,23 +75,35 @@ pub extern "C" fn husk_renderer_render_frame(handle: *mut Renderer) {
     // Hold the registry lock while drawing, so a Dart call can't change the
     // renderer mid-frame. If a Dart call is busy, skip this frame instead
     // of making the window wait.
-    let Ok(_active) = ACTIVE_RENDERER.try_lock() else {
-        return;
+    let Some(_active) = ACTIVE_RENDERER.try_lock() else {
+    return;
     };
     let renderer = unsafe { &mut *handle };
-    renderer.render_frame();
+    // A frame that fails (the GPU ran out of memory or was reset) is skipped
+    // instead of closing the program, and said once.
+    if run_guarded(|| renderer.render_frame()).is_some() {
+        FRAME_FAILED.store(false, Ordering::Relaxed);
+    } else if !FRAME_FAILED.swap(true, Ordering::Relaxed) {
+        eprintln!("Husk: a frame could not be drawn and was skipped");
+    }
 }
 
+/// Changes the renderer's size. Returns whether it now has the new size: on
+/// false it keeps its old size, and the caller must keep reading frames at
+/// that size.
 #[unsafe(no_mangle)]
-pub extern "C" fn husk_renderer_resize(handle: *mut Renderer, width: u32, height: u32) {
+pub extern "C" fn husk_renderer_resize(handle: *mut Renderer, width: u32, height: u32) -> bool {
     if handle.is_null() {
-        return;
+        return false;
     }
     let _active = ACTIVE_RENDERER.lock().unwrap();
     let renderer = unsafe { &mut *handle };
-    renderer.resize(width, height);
+    let resized = run_guarded(|| renderer.resize(width, height)).is_some();
+    if !resized {
+        eprintln!("Husk: the viewport could not be resized");
+    }
+    resized
 }
-
 /// Returns a pointer to the most recently rendered frame's pixel data.
 /// Valid until the next call to `husk_renderer_render_frame` on the same
 /// handle, or until the handle is destroyed.
@@ -105,5 +141,16 @@ pub extern "C" fn husk_renderer_destroy(handle: *mut Renderer) {
 
     unsafe {
         drop(Box::from_raw(handle));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_is_caught_instead_of_unwinding_out() {
+        assert_eq!(run_guarded(|| 7), Some(7));
+        assert_eq!(run_guarded(|| -> i32 { panic!("a graphics failure") }), None);
     }
 }

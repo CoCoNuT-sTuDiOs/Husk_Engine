@@ -28,7 +28,7 @@ class PanelHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          if (trailing != null) trailing!,
+          ?trailing,
         ],
       ),
     );

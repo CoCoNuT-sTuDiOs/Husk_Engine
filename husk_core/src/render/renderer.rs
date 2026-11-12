@@ -196,6 +196,17 @@ fn standard_view_angles(name: &str) -> Option<(f32, f32)> {
     }
 }
 
+/// The address of a frame's pixels, or null when there is no frame yet. An
+/// empty `Vec` still has an address (a placeholder that points at nothing),
+/// and handing that to the window to read would crash it.
+fn frame_address(frame: &[u8]) -> *const u8 {
+    if frame.is_empty() {
+        std::ptr::null()
+    } else {
+        frame.as_ptr()
+    }
+}
+
 /// Whether the viewport is orthographic after the view has been rotated. A
 /// standard view (front, top and so on) is orthographic, and turning it
 /// goes back to perspective, but an orthographic view that was switched on by
@@ -407,14 +418,31 @@ impl Renderer {
             ..Default::default()
         });
 
-        let adapter = instance
+        // Prefer a real GPU. If none can be used, fall back to a software
+        // adapter (slow, but the program runs instead of closing), and only
+        // give up when there is neither.
+        let adapter = match instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: None,
                 force_fallback_adapter: false,
             })
             .await
-            .expect("Failed to find a suitable GPU adapter");
+        {
+            Some(adapter) => adapter,
+            None => {
+                eprintln!("Husk: no usable GPU was found, trying the software renderer");
+                instance
+                    .request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::LowPower,
+                        compatible_surface: None,
+                        force_fallback_adapter: true,
+                    })
+                    .await
+                    .expect("Failed to find a suitable GPU adapter, or a software one")
+            }
+        };
+
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
@@ -1615,7 +1643,7 @@ impl Renderer {
     }
 
     pub fn frame_ptr(&self) -> *const u8 {
-        self.last_frame.as_ptr()
+        frame_address(&self.last_frame)
     }
 
     pub fn frame_len(&self) -> usize {
@@ -2079,6 +2107,13 @@ mod tests {
             assert!((eye_direction - husk_eye).length() < 1e-5, "{name}: eye");
             assert!((up - camera_up(yaw, pitch)).length() < 1e-5, "{name}: up");
         }
+    }
+
+    #[test]
+    fn an_empty_frame_has_no_address_to_read() {
+        assert!(frame_address(&[]).is_null());
+        let pixels = [1u8, 2, 3, 4];
+        assert_eq!(frame_address(&pixels), pixels.as_ptr());
     }
 
     #[test]

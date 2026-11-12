@@ -95,13 +95,27 @@ void FlutterWindow::SetUpHuskTexture() {
           ->GetRegistrar<flutter::PluginRegistrarWindows>(core_registrar);
   husk_texture_registrar_ = registrar->texture_registrar();
 
+  // Everything that needs the graphics runs inside this one-pass loop, so a
+  // failure can leave it with `break` and still reach the method channel
+  // below. Dart then hears why there is no viewport, instead of waiting for
+  // a texture that will never come.
+  do {
   if (!husk_bridge_.Load()) {
     OutputDebugStringA("Husk: failed to load husk_core.dll\n");
-    return;
+    husk_error_ =
+        "Husk's graphics library (husk_core.dll) could not be loaded.";
+    break;
   }
   const uint32_t width = 1000;
   const uint32_t height = 1000;
   husk_renderer_ = husk_bridge_.CreateRenderer(width, height);
+  if (!husk_renderer_) {
+    OutputDebugStringA("Husk: the graphics could not be started\n");
+    husk_error_ =
+        "The graphics could not be started. No usable GPU or graphics "
+        "driver was found.";
+    break;
+  }
   husk_width_ = width;
   husk_height_ = height;
   // The bridge already loaded the DLL, so this only finds its resize function.
@@ -122,7 +136,7 @@ flutter::PixelBufferTexture(
 
   husk_texture_id_ =
       husk_texture_registrar_->RegisterTexture(husk_texture_.get());
-
+  } while (false);
   husk_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), "husk/texture",
@@ -132,7 +146,11 @@ flutter::PixelBufferTexture(
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) {
         if (call.method_name() == "getTextureId") {
-          result->Success(flutter::EncodableValue(husk_texture_id_));
+          if (!husk_error_.empty()) {
+            result->Error("graphics_unavailable", husk_error_);
+          } else {
+            result->Success(flutter::EncodableValue(husk_texture_id_));
+          }
         } else if (call.method_name() == "resize") {
           int32_t new_width = 0;
           int32_t new_height = 0;
@@ -161,9 +179,14 @@ flutter::PixelBufferTexture(
             result->Error("bad_resize",
                           "Resize needs a width and height between 16 and 4096");
           } else {
-            ResizeHuskRenderer(static_cast<uint32_t>(new_width),
-                               static_cast<uint32_t>(new_height));
-            result->Success();
+            if (ResizeHuskRenderer(static_cast<uint32_t>(new_width),
+                                   static_cast<uint32_t>(new_height))) {
+              result->Success();
+            } else {
+              result->Error(
+                  "resize_failed",
+                  "The viewport could not be resized; it keeps its old size");
+            }
           }
         } else {
                   result->NotImplemented();
@@ -176,8 +199,15 @@ const FlutterDesktopPixelBuffer* FlutterWindow::CopyHuskPixelBuffer(
   // Read the frame's pointer and size together, so a resize on the other
   // thread can never leave them out of step.
   std::lock_guard<std::mutex> lock(husk_frame_mutex_);
-  husk_pixel_buffer_descriptor_.buffer =
-  husk_bridge_.FramePtr(husk_renderer_);
+  // No renderer, or no frame drawn yet: there is nothing to show.
+  if (!husk_renderer_) {
+    return nullptr;
+  }
+  const auto* frame = husk_bridge_.FramePtr(husk_renderer_);
+  if (!frame) {
+    return nullptr;
+  }
+  husk_pixel_buffer_descriptor_.buffer = frame;
   husk_pixel_buffer_descriptor_.width = husk_width_;
   husk_pixel_buffer_descriptor_.height = husk_height_;  
   husk_pixel_buffer_descriptor_.release_callback = nullptr;
@@ -185,11 +215,16 @@ const FlutterDesktopPixelBuffer* FlutterWindow::CopyHuskPixelBuffer(
   return &husk_pixel_buffer_descriptor_;
 }
 
-void FlutterWindow::ResizeHuskRenderer(uint32_t width, uint32_t height) {
-  // Held while the size changes so the engine never reads a frame together
+bool FlutterWindow::ResizeHuskRenderer(uint32_t width, uint32_t height) {
+// Held while the size changes so the engine never reads a frame together
   // with the wrong size.
   std::lock_guard<std::mutex> lock(husk_frame_mutex_);
-  husk_resize_(husk_renderer_, width, height);
+  // If the renderer could not change size it keeps its old one, and so must
+  // the size the engine reads frames at.
+  if (!husk_resize_(husk_renderer_, width, height)) {
+    return false;
+  }
   husk_width_ = width;
   husk_height_ = height;
+  return true;
 }

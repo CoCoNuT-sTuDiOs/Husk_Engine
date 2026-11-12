@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 
 /// The shortcuts manual: every key and mouse action in Husk in one place,
-/// shown by Help > Keyboard Shortcuts (Ctrl+/).
+/// shown by Help > Keyboard Shortcuts (Ctrl+/), one table per group.
 ///
-/// To my future self =>  KEEP THIS FILE CURRENT. Whenever a shortcut is added, changed or removed
+/// KEEP THIS FILE CURRENT. Whenever a shortcut is added, changed or removed
 /// anywhere in the app, change its line here in the same edit.
 ///
 /// Not audited yet: keys inside the timeline, the tool column and the side
@@ -112,71 +112,30 @@ const List<ShortcutSection> shortcutSections = [
   ]),
 ];
 
-/// The manual as a dialog.
+/// The manual as a dialog: one table per group, so every group stands apart.
 class ShortcutsDialog extends StatelessWidget {
   const ShortcutsDialog({super.key});
-
-  List<Widget> _rows(ShortcutSection section) {
-    return [
-      Padding(
-        padding: const EdgeInsets.only(top: 14, bottom: 6),
-        child: Text(
-          section.title.toUpperCase(),
-          style: const TextStyle(
-            color: HuskColors.orange,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.5,
-          ),
-        ),
-      ),
-      for (final entry in section.entries)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 210,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: _KeyChip(entry.keys),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  entry.does,
-                  style: const TextStyle(
-                    color: HuskColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-    ];
-  }
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: HuskColors.panel,
+      insetPadding: const EdgeInsets.all(24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620, maxHeight: 640),
+        constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 860),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 8, 8),
+              padding: const EdgeInsets.fromLTRB(28, 18, 12, 12),
               child: Row(
                 children: [
                   const Expanded(
                     child: Text(
                       'Keyboard shortcuts',
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: 22,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -192,11 +151,12 @@ class ShortcutsDialog extends StatelessWidget {
             const Divider(height: 1, color: HuskColors.border),
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                padding: const EdgeInsets.fromLTRB(28, 4, 28, 28),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final section in shortcutSections) ..._rows(section),
+                    for (final section in shortcutSections)
+                      _SectionTable(section),
                   ],
                 ),
               ),
@@ -204,6 +164,111 @@ class ShortcutsDialog extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// One group of the manual: its title, then a bordered table with a header
+/// row and a ruled row for every shortcut.
+class _SectionTable extends StatelessWidget {
+  const _SectionTable(this.section);
+
+  final ShortcutSection section;
+
+  TableRow _headerRow() {
+    const style = TextStyle(
+      color: HuskColors.textSecondary,
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.8,
+    );
+    return TableRow(
+      decoration: BoxDecoration(color: HuskColors.canvas),
+      children: const [
+        _Cell(child: Text('SHORTCUT', style: style)),
+        _Cell(child: Text('WHAT IT DOES', style: style)),
+      ],
+    );
+  }
+
+  TableRow _entryRow(ShortcutEntry entry) {
+    return TableRow(
+      children: [
+        _Cell(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _KeyChip(entry.keys),
+          ),
+        ),
+        _Cell(
+          child: Text(
+            entry.does,
+            style: const TextStyle(
+              color: HuskColors.textSecondary,
+              fontSize: 14,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            section.title.toUpperCase(),
+            style: const TextStyle(
+              color: HuskColors.orange,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.6,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              border: Border.all(color: HuskColors.border),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Table(
+              columnWidths: const {
+                0: FixedColumnWidth(300),
+                1: FlexColumnWidth(),
+              },
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              border: const TableBorder(
+                horizontalInside: BorderSide(color: HuskColors.border),
+                verticalInside: BorderSide(color: HuskColors.border),
+              ),
+              children: [
+                _headerRow(),
+                for (final entry in section.entries) _entryRow(entry),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Cell extends StatelessWidget {
+  const _Cell({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: child,
     );
   }
 }
@@ -216,12 +281,12 @@ class _KeyChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         border: Border.all(color: HuskColors.border),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(5),
       ),
-      child: Text(label, style: HuskText.readout),
+      child: Text(label, style: HuskText.readout.copyWith(fontSize: 13)),
     );
   }
 }

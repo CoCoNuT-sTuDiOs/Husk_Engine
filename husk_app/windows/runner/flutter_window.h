@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "husk_bridge.h"
@@ -52,8 +53,11 @@ class FlutterWindow : public Win32Window {
   // resized on one thread and the engine reads the frame on another.
   std::mutex husk_frame_mutex_;
   // husk_core.dll's resize function, looked up once the renderer exists.
-  typedef void (*HuskResizeFn)(void*, uint32_t, uint32_t);
+  typedef bool (*HuskResizeFn)(void*, uint32_t, uint32_t);
   HuskResizeFn husk_resize_ = nullptr;
+  // Why the graphics could not be started, in plain words; empty when they
+  // are running. Dart asks for the texture and gets this as the error.
+  std::string husk_error_;
   static constexpr UINT_PTR kHuskRenderTimerId = 1;
   
   // Method channel used to hand the texture ID to Dart.
@@ -64,7 +68,7 @@ class FlutterWindow : public Win32Window {
 void SetUpHuskTexture();
 
   // Changes the renderer's size (the viewport follows its panel).
-  void ResizeHuskRenderer(uint32_t width, uint32_t height);
+  bool ResizeHuskRenderer(uint32_t width, uint32_t height);
   // Callback invoked by the engine to fetch the latest frame.
   const FlutterDesktopPixelBuffer* CopyHuskPixelBuffer(size_t width,
                                                        size_t height);

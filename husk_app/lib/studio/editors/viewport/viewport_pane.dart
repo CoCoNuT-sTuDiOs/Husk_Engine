@@ -41,6 +41,9 @@ class _ViewportPaneState extends State<ViewportPane> {
 
   int? _textureId;
 
+  // Why the viewport has no picture, when the graphics could not be started.
+  String? _graphicsError;
+
   // The size the engine is rendering at right now, in pixels. The native
   // side starts at 1000 x 1000 until the first resize.
   Size _renderSize = const Size(1000, 1000);
@@ -95,11 +98,21 @@ class _ViewportPaneState extends State<ViewportPane> {
   }
 
   Future<void> _loadTextureId() async {
-    final id = await _viewport.textureId();
-    if (!mounted) return;
-    setState(() {
-      _textureId = id;
-    });
+        try {
+      final id = await _viewport.textureId();
+      if (!mounted) return;
+      setState(() {
+        _textureId = id;
+      });
+    } on PlatformException catch (error) {
+      // The graphics could not be started (no usable GPU, say). Say so in
+      // the viewport instead of showing a spinner for ever. The rest of
+      // Husk still works.
+      if (!mounted) return;
+      setState(() {
+        _graphicsError = error.message ?? 'The graphics could not be started.';
+      });
+    }
   }
 
   void _requestSize(Size paneSize, double pixelRatio) {
@@ -162,7 +175,7 @@ class _ViewportPaneState extends State<ViewportPane> {
       _viewport.zoom(1 / 1.08); // zoom in
       return true;
     }
-        if (event is KeyDownEvent && _handleViewKey(key)) return true;
+    if (event is KeyDownEvent && _handleViewKey(key)) return true;
     if (key == LogicalKeyboardKey.delete && event is KeyDownEvent) {
       widget.actions.deleteObject(context);
       return true;
@@ -282,8 +295,6 @@ class _ViewportPaneState extends State<ViewportPane> {
         // And for a scale handle.
         _beginScaleDrag(details.localPosition, scale);
     }
-
-
   }
 
   void _handlePanUpdate(DragUpdateDetails details, double scale) {
@@ -465,9 +476,11 @@ class _ViewportPaneState extends State<ViewportPane> {
     final (dx, dy, dz) = ViewportController.gizmoAxisDirections[axis];
     final along = param - _gizmoStartParam;
     final (sx, sy, sz) = _gizmoStart;
-    _studio.setActivePosition(
-      (sx + dx * along, sy + dy * along, sz + dz * along),
-    );
+    _studio.setActivePosition((
+      sx + dx * along,
+      sy + dy * along,
+      sz + dz * along,
+    ));
   }
 
   void _endDrag() {
@@ -482,8 +495,12 @@ class _ViewportPaneState extends State<ViewportPane> {
     final position = _studio.activeTransform.position;
     switch (_studio.tool) {
       case StudioTool.moveObject:
-        _gizmoHighlight.value =
-            _viewport.gizmoAxisAt(pointer, position, scale, kGizmoLength);
+        _gizmoHighlight.value = _viewport.gizmoAxisAt(
+          pointer,
+          position,
+          scale,
+          kGizmoLength,
+        );
       case StudioTool.rotateObject:
         _gizmoHighlight.value = _viewport.gizmoRingAt(
           pointer,
@@ -577,12 +594,63 @@ class _ViewportPaneState extends State<ViewportPane> {
             final local = box.globalToLocal(details.offset);
             showMessage(
               context,
-              _studio.addShape(details.data, local.dx / scale, local.dy / scale),
+              _studio.addShape(
+                details.data,
+                local.dx / scale,
+                local.dy / scale,
+              ),
             );
           },
           builder: (context, candidate, rejected) => render,
         );
       },
+    );
+  }
+
+  /// What the viewport shows when the graphics could not be started: the
+  /// reason, in plain words. Menus, panels and saving still work.
+  Widget _graphicsErrorView(String message) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: HuskColors.orange,
+                size: 36,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'The viewport could not start',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: HuskColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'The rest of Husk still works. Restart Husk after updating '
+                'your graphics driver.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: HuskColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -596,7 +664,9 @@ class _ViewportPaneState extends State<ViewportPane> {
         Expanded(
           child: Container(
             color: HuskColors.canvas,
-            child: textureId == null
+            child: _graphicsError != null
+                ? _graphicsErrorView(_graphicsError!)
+                : textureId == null
                 ? const Center(
                     child: CircularProgressIndicator(color: HuskColors.orange),
                   )
