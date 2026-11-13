@@ -72,6 +72,11 @@ const List<ShortcutSection> shortcutSections = [
     ),
     ShortcutEntry('Ctrl+/', 'Open this manual'),
   ]),
+  ShortcutSection('Tools', [
+    ShortcutEntry('G', 'Switch to the Move object tool'),
+    ShortcutEntry('R', 'Switch to the Rotate object tool'),
+    ShortcutEntry('S', 'Switch to the Scale object tool'),
+  ]),
   ShortcutSection('Animation', [
     ShortcutEntry('Space', 'Play or pause the animation'),
   ]),

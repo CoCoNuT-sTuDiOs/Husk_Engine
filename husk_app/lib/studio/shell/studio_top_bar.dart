@@ -125,7 +125,17 @@ class StudioTopBar extends StatelessWidget {
                         MenuItemButton(
                           trailingIcon: _shortcut('Numpad .'),
                           onPressed: () => actions.frameSelected(context),
-                          child: const Text('Frame Selected'),
+                        child: const Text('Frame Selected'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('='),
+                          onPressed: actions.zoomIn,
+                          child: const Text('Zoom In'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('-'),
+                          onPressed: actions.zoomOut,
+                          child: const Text('Zoom Out'),
                         ),
                         const Divider(height: 8),
                         MenuItemButton(

@@ -11,6 +11,7 @@ import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/studio/state/timeline_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/typing.dart';
+import 'package:husk_app/studio/state/keymap.dart';
 
 class StudioShell extends StatefulWidget {
   const StudioShell({super.key});
@@ -68,42 +69,19 @@ class _StudioShellState extends State<StudioShell> {
     // While the shortcuts manual is open it has the keys: Delete, Space and
     // the number keys must not act on the scene behind it.
     if (_actions.shortcutsOpen) return false;
-// Space on its own plays and pauses the animation (Ctrl+Space, below,
-    // maximizes the viewport).
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.space &&
-        !HardwareKeyboard.instance.isControlPressed &&
-        !isTyping()) {
-      _actions.togglePlay(context);
-      return true;
-    }
-    if (!HardwareKeyboard.instance.isControlPressed) return false;
-    final key = event.logicalKey;
-        if (key == LogicalKeyboardKey.keyZ &&
-        (event is KeyDownEvent || event is KeyRepeatEvent) &&
-        !isTyping()) {
-      _actions.undoBone(context);
-      return true;
-    }
-    if (event is! KeyDownEvent) return false;
-    if (key == LogicalKeyboardKey.keyS) {
-      _actions.save(context);
-      return true;
-    }
-    if (key == LogicalKeyboardKey.keyO) {
-      _actions.load(context);
-      return true;
-    }
-        if (key == LogicalKeyboardKey.space) {
-      _actions.toggleMaximize();
-      return true;
-    }
-    if (key == LogicalKeyboardKey.slash ||
-        key == LogicalKeyboardKey.numpadDivide) {
-      _actions.showShortcuts(context);
-      return true;
-    }
-    return false;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    final binding = bindingForKey(
+      event.logicalKey,
+      ctrl: HardwareKeyboard.instance.isControlPressed,
+      isRepeat: event is KeyRepeatEvent,
+    );
+    if (binding == null) return false;
+    // A text box has the keys, except for the rows the table marks as
+    // working while typing.
+    if (isTyping() && !binding.whileTyping) return false;
+    _actions.runCommand(context, binding.command);
+    return true;
+
   }
 
   @override

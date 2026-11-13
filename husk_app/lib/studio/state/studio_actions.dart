@@ -6,6 +6,7 @@ import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:husk_app/ui/shortcuts_manual.dart';
+import 'package:husk_app/studio/state/keymap.dart';
 
 /// The commands a user can trigger from menus, panels, headers and
 /// shortcuts. Each one lives here once, so every place that offers it
@@ -125,9 +126,6 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
 
   bool _shortcutsOpen = false;
 
-  /// Whether the shortcuts manual is on screen. While it is, the window's
-  /// key handlers leave the keys alone, so Delete or Space do nothing to the
-  /// scene behind it.
   bool get shortcutsOpen => _shortcutsOpen;
 
   /// Opens the shortcuts manual (Help > Keyboard Shortcuts, Ctrl+/).
@@ -162,12 +160,75 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
     }
   }
 
+  /// Moves the view away, as the - key does.
+  void zoomOut() {
+    studio.leaveCameraView();
+    viewport.zoom(1.08);
+  }
+
+  /// Brings the view closer, as the = key does.
+  void zoomIn() {
+    studio.leaveCameraView();
+    viewport.zoom(1 / 1.08);
+  }
+
   /// Switches the viewport between perspective and orthographic.
   void toggleOrthographic() {
     studio.leaveCameraView();
     viewport.toggleOrthographic();
   }
 
+
+  // Keys
+
+  /// Runs the command a key is bound to (see keymap.dart). Each command
+  /// calls the same method its menu entry calls.
+  void runCommand(BuildContext context, HuskCommand command) {
+    switch (command) {
+      case HuskCommand.save:
+        save(context);
+      case HuskCommand.load:
+        load(context);
+      case HuskCommand.undoBone:
+        undoBone(context);
+      case HuskCommand.deleteObject:
+        deleteObject(context);
+      case HuskCommand.zoomIn:
+        zoomIn();
+      case HuskCommand.zoomOut:
+        zoomOut();
+      case HuskCommand.frameAll:
+        frameAll(context);
+      case HuskCommand.frameSelected:
+        frameSelected(context);
+      case HuskCommand.viewFront:
+        setStandardView('front');
+      case HuskCommand.viewBack:
+        setStandardView('back');
+      case HuskCommand.viewRight:
+        setStandardView('right');
+      case HuskCommand.viewLeft:
+        setStandardView('left');
+      case HuskCommand.viewTop:
+        setStandardView('top');
+      case HuskCommand.viewBottom:
+        setStandardView('bottom');
+      case HuskCommand.toggleOrthographic:
+        toggleOrthographic();
+      case HuskCommand.togglePlay:
+        togglePlay(context);
+      case HuskCommand.toggleMaximize:
+        toggleMaximize();
+          case HuskCommand.showShortcuts:
+        showShortcuts(context);
+      case HuskCommand.toolMoveObject:
+        studio.setTool(StudioTool.moveObject);
+      case HuskCommand.toolRotateObject:
+        studio.setTool(StudioTool.rotateObject);
+      case HuskCommand.toolScaleObject:
+        studio.setTool(StudioTool.scaleObject);
+    }
+  }
 
   // Timeline
 

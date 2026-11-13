@@ -16,7 +16,6 @@ import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
-import 'package:husk_app/ui/typing.dart';
 
 // The renderer never draws more than this many pixels on its long side.
 const double _maxRenderSide = 1920;
@@ -80,7 +79,6 @@ class _ViewportPaneState extends State<ViewportPane> {
   void initState() {
     super.initState();
     _loadTextureId();
-    HardwareKeyboard.instance.addHandler(_handleKey);
     _overlayTimer = Timer.periodic(
       const Duration(milliseconds: 33),
       (_) => _overlayTick.value++,
@@ -89,7 +87,6 @@ class _ViewportPaneState extends State<ViewportPane> {
 
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handleKey);
     _overlayTimer?.cancel();
     _resizeTimer?.cancel();
     _overlayTick.dispose();
@@ -153,62 +150,6 @@ class _ViewportPaneState extends State<ViewportPane> {
     setState(() {
       _renderSize = size;
     });
-  }
-
-  bool _handleKey(KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
-    // A text box has the keys: Delete, - and = belong to it.
-    if (isTyping()) return false;
-    // So does the shortcuts manual while it is open.
-    if (widget.actions.shortcutsOpen) return false;
-    final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.minus ||
-        key == LogicalKeyboardKey.numpadSubtract) {
-      _studio.leaveCameraView();
-      _viewport.zoom(1.08); // zoom out
-      return true;
-    }
-    if (key == LogicalKeyboardKey.equal ||
-        key == LogicalKeyboardKey.add ||
-        key == LogicalKeyboardKey.numpadAdd) {
-      _studio.leaveCameraView();
-      _viewport.zoom(1 / 1.08); // zoom in
-      return true;
-    }
-    if (event is KeyDownEvent && _handleViewKey(key)) return true;
-    if (key == LogicalKeyboardKey.delete && event is KeyDownEvent) {
-      widget.actions.deleteObject(context);
-      return true;
-    }
-    return false;
-  }
-
-  bool _handleViewKey(LogicalKeyboardKey key) {
-    final opposite = HardwareKeyboard.instance.isControlPressed;
-    String? view;
-    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
-      view = opposite ? 'back' : 'front';
-    } else if (key == LogicalKeyboardKey.digit3 ||
-        key == LogicalKeyboardKey.numpad3) {
-      view = opposite ? 'left' : 'right';
-    } else if (key == LogicalKeyboardKey.digit7 ||
-        key == LogicalKeyboardKey.numpad7) {
-      view = opposite ? 'bottom' : 'top';
-    } else if (key == LogicalKeyboardKey.digit5 ||
-        key == LogicalKeyboardKey.numpad5) {
-      widget.actions.toggleOrthographic();
-      return true;
-    } else if (key == LogicalKeyboardKey.home) {
-      widget.actions.frameAll(context);
-      return true;
-    } else if (key == LogicalKeyboardKey.numpadDecimal ||
-        key == LogicalKeyboardKey.period) {
-      widget.actions.frameSelected(context);
-      return true;
-    }
-    if (view == null) return false;
-    widget.actions.setStandardView(view);
-    return true;
   }
 
   /// Dragging with the middle mouse button turns the view; with Shift held
