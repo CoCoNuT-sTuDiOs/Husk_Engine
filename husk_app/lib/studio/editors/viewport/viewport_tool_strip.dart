@@ -47,8 +47,8 @@ class ViewportToolStrip extends StatelessWidget {
           const SizedBox(width: 10),
           IconAction(
             icon: PhosphorIcon(PhosphorIconsRegular.arrowCounterClockwise),
-            tooltip: 'Undo last bone (Ctrl+Z)',
-            onPressed: () => actions.undoBone(context),
+            tooltip: 'Undo (Ctrl+Z)',
+          onPressed: () => actions.undo(context),
           ),
         ];
       case StudioTool.move:

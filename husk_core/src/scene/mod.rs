@@ -33,9 +33,9 @@ pub inverse: glam::Mat4,
 }
 
 /// Everything that belongs to one animated thing in a scene.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Object {
-    /// What the outliner calls it.
+/// What the outliner calls it.
         pub name: String,
     /// Where the object sits in the scene. The scene owns this; the
     /// renderer's matrix is only the GPU-side copy of it.
@@ -61,7 +61,12 @@ pub struct Object {
     /// A locked object stays exactly as it is: it cannot be picked in the
     /// viewport, moved, rotated, scaled or deleted. It still draws and
     /// still plays its animation.
-    pub locked: bool,
+        pub locked: bool,
+    /// The object's geometry, shared with the renderer, which keeps its own
+    /// handle to draw from. The scene's handle keeps the mesh alive after the
+    /// renderer lets go of it, which is what undoing a delete needs. None for
+    /// an object with no geometry, and until a mesh is shared.
+    pub mesh: Option<std::sync::Arc<crate::geometry::mesh::MeshData>>,
 }
 
 impl Object {
@@ -221,6 +226,24 @@ pub struct ObjectFrame {
     pub placed: bool,
 }
 
+/// A saved copy of the objects and which one is active, for undo and redo.
+/// Meshes are shared handles, so a copy costs the skeletons, weights and
+/// keys, not the geometry.
+#[derive(Clone)]
+pub struct Snapshot {
+    objects: Vec<Object>,
+    active_object: usize,
+}
+
+/// What the renderer needs to draw one object again from scratch.
+pub struct DrawState {
+    pub mesh: Option<std::sync::Arc<crate::geometry::mesh::MeshData>>,
+    pub model: glam::Mat4,
+    pub material: material::Material,
+    pub weights: Option<Vec<VertexWeights>>,
+    pub skinning: Option<Vec<glam::Mat4>>,
+}
+
 /// One shot: a list of objects, and which one the tools act on.
 #[derive(Default)]
 pub struct Scene {
@@ -231,10 +254,155 @@ pub struct Scene {
     /// The space around the objects: background and studio light.
     pub world: world::World,
     /// The id the next object that needs one gets.
-    pub next_id: u64,
+pub next_id: u64,
+    /// Saved states to go back to, oldest first (see `Scene::push_undo`).
+    pub undo_stack: Vec<Snapshot>,
+    /// States that were undone, which redo brings back.
+    pub redo_stack: Vec<Snapshot>,
+    /// What the last saved state was for, which object was active, and when,
+    /// so a drag or a slider scrub that changes the same thing many times in
+    /// a row is one step.
+    pub last_edit: Option<(&'static str, usize, std::time::Instant)>,
 }
 
 impl Scene {
+        /// Adds `object` to the end of the list and gives it an id that is never
+    /// used again, not even after the object is removed. Returns its index.
+    pub fn push_object(&mut self, mut object: Object) -> usize {
+        self.next_id += 1;
+        object.id = self.next_id;
+        self.objects.push(object);
+        self.objects.len() - 1
+    }
+
+/// The most saved states kept for undo. Older ones are dropped.
+    const MAX_UNDO: usize = 30;
+
+    /// Changes of the same kind closer together than this are one step.
+    const MERGE_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            objects: self.objects.clone(),
+            active_object: self.active_object,
+        }
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) {
+        self.objects = snapshot.objects;
+        self.active_object = snapshot
+            .active_object
+            .min(self.objects.len().saturating_sub(1));
+    }
+
+    /// Saves the objects as they are now, so undo can come back to them.
+    /// Call it before a change. `kind` names what is about to change: a
+    /// change of the same kind on the same active object within half a second
+    /// of the last one is part of the same step (a drag changes the same
+    /// thing dozens of times), so nothing new is saved. `None` always saves.
+    pub fn push_undo(&mut self, kind: Option<&'static str>) {
+        let now = std::time::Instant::now();
+        if let (Some(kind), Some((last_kind, last_active, at))) = (kind, self.last_edit) {
+            if kind == last_kind
+                && self.active_object == last_active
+                && now.duration_since(at) < Self::MERGE_WINDOW
+            {
+                self.last_edit = Some((kind, last_active, now));
+                return;
+            }
+        }
+        self.last_edit = kind.map(|kind| (kind, self.active_object, now));
+        let saved = self.snapshot();
+        self.undo_stack.push(saved);
+        if self.undo_stack.len() > Self::MAX_UNDO {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Runs `change` after saving the objects for undo. If `change` reports
+    /// that nothing changed (false), the saved state is dropped again, so
+    /// undo never has an empty step.
+    pub fn change_with_undo(&mut self, change: impl FnOnce(&mut Scene) -> bool) -> bool {
+        let redo = std::mem::take(&mut self.redo_stack);
+        self.push_undo(None);
+        let changed = change(self);
+        if !changed {
+            self.undo_stack.pop();
+            self.redo_stack = redo;
+        }
+        changed
+    }
+
+    /// Goes back to the last saved state. False, changing nothing, when
+    /// there is none.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo_stack.pop() else {
+            return false;
+        };
+        let current = self.snapshot();
+        self.redo_stack.push(current);
+        self.restore(previous);
+        self.last_edit = None;
+        true
+    }
+
+    /// Goes forward again after an undo. False, changing nothing, when
+    /// there is nothing to redo.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo_stack.pop() else {
+            return false;
+        };
+        let current = self.snapshot();
+        self.undo_stack.push(current);
+        self.restore(next);
+        self.last_edit = None;
+        true
+    }
+
+    /// What the renderer needs to draw every object again from scratch, in
+    /// list order.
+    pub fn draw_states(&mut self) -> Vec<DrawState> {
+        let models: Vec<glam::Mat4> = (0..self.objects.len())
+            .map(|index| self.world_matrix(index))
+            .collect();
+        self.objects
+            .iter_mut()
+            .zip(models)
+            .map(|(object, model)| {
+                let skinning = if object.skeleton.bones.is_empty() {
+                    None
+                } else {
+                    object.pose.ensure_covers(&object.skeleton);
+                    Some(object.pose.skinning_matrices(&object.skeleton))
+                };
+                DrawState {
+                    mesh: object.mesh.clone(),
+                    model,
+                    material: object.material,
+                    weights: object.weights.clone(),
+                    skinning,
+                }
+            })
+            .collect()
+    }
+
+    /// Gives the object at `index` its mesh. False, changing nothing, for an
+    /// unknown index.
+    pub fn set_mesh(
+        &mut self,
+        index: usize,
+        mesh: std::sync::Arc<crate::geometry::mesh::MeshData>,
+    ) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) => {
+                object.mesh = Some(mesh);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Removes the object at `index`. Object 0, the loaded model, cannot
     /// be removed, and neither can an index that does not exist: both
     /// return false and change nothing. The active object stays the same
@@ -558,6 +726,8 @@ pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
     /// Locks every object except the active one, which is unlocked: the
     /// "work on this one only" switch.
     pub fn lock_all_except_active(&mut self) {
+        // This cannot fail, so it saves the state for undo itself.
+        self.push_undo(None);
         let keep = self.active_object;
         for (index, object) in self.objects.iter_mut().enumerate() {
             object.locked = index != keep;
@@ -566,7 +736,9 @@ pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
 
     /// Unlocks every object.
     pub fn unlock_all(&mut self) {
-        for object in self.objects.iter_mut() {
+        // This cannot fail, so it saves the state for undo itself.
+        self.push_undo(None);
+      for object in self.objects.iter_mut() {
             object.locked = false;
         }
     }
@@ -680,11 +852,12 @@ pub fn active_object() -> ActiveObject {
     let scene_index = guard.active_scene;
     let scene = &mut guard.scenes[scene_index];
     if scene.objects.is_empty() {
-        scene.objects.push(Object::default());
+     scene.push_object(Object::default());
         scene.active_object = 0;
     }
     ActiveObject { guard }
-}
+
+    }
 pub fn add_object(
     base: &str,
     transform: transform::Transform,
@@ -699,12 +872,13 @@ pub fn add_object(
     let scene_index = guard.active_scene;
     let scene = &mut guard.scenes[scene_index];
     if scene.objects.is_empty() {
-        scene.objects.push(Object::default());
+        scene.push_object(Object::default());
         scene.active_object = 0;
     }
+    scene.push_undo(None);
     let index = scene.objects.len();
-    scene.objects.push(Object {
-        name: format!("{base} {index}"),
+    scene.push_object(Object {
+    name: format!("{base} {index}"),
         transform,
         material,
         kind,
@@ -735,10 +909,58 @@ pub fn remove_active_object() -> Option<usize> {
     let scene_index = guard.active_scene;
     let scene = guard.scenes.get_mut(scene_index)?;
     let index = scene.active_object;
-    if scene.remove_object(index) {
-        Some(index)
+    if scene.change_with_undo(|scene| scene.remove_object(index)) {
+    Some(index)
     } else {
         None
+    }
+}
+
+/// Gives the object at `index` its mesh (see `Scene::set_mesh`). False,
+/// changing nothing, for an unknown index.
+pub fn set_object_mesh(
+    index: usize,
+    mesh: std::sync::Arc<crate::geometry::mesh::MeshData>,
+) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => scene.set_mesh(index, mesh),
+        None => false,
+    }
+}
+
+/// Saves the active scene's objects for undo (see `Scene::push_undo`).
+pub fn push_undo(kind: Option<&'static str>) {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.push_undo(kind);
+    }
+}
+
+/// Goes back to the last saved state of the active scene.
+pub fn undo() -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    guard.scenes.get_mut(scene_index).map_or(false, |scene| scene.undo())
+}
+
+/// Goes forward again after an undo.
+pub fn redo() -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    guard.scenes.get_mut(scene_index).map_or(false, |scene| scene.redo())
+}
+
+/// What the renderer needs to draw every object of the active scene again
+/// from scratch, and the index of the active one.
+pub fn draw_states() -> (Vec<DrawState>, usize) {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => (scene.draw_states(), scene.active_object),
+        None => (Vec::new(), 0),
     }
 }
 
@@ -747,7 +969,7 @@ pub fn set_object_locked(index: usize, locked: bool) -> bool {
     let mut guard = PROJECT.lock().unwrap();
     let scene_index = guard.active_scene;
     match guard.scenes.get_mut(scene_index) {
-        Some(scene) => scene.set_locked(index, locked),
+    Some(scene) => scene.change_with_undo(|scene| scene.set_locked(index, locked)),
         None => false,
     }
 }
@@ -827,6 +1049,10 @@ pub fn set_active_transform(transform: transform::Transform) -> Option<usize> {
     let scene_index = guard.active_scene;
     let scene = guard.scenes.get_mut(scene_index)?;
     let index = scene.active_object;
+    let editable = scene.objects.get(index).is_some_and(|object| !object.locked);
+    if editable {
+        scene.push_undo(Some("transform"));
+    }
     if scene.set_world_transform(index, transform) {
     Some(index)
     } else {
@@ -856,8 +1082,9 @@ pub fn set_active_material(material: material::Material) -> Option<usize> {
     let scene_index = guard.active_scene;
     let scene = guard.scenes.get_mut(scene_index)?;
     let index = scene.active_object;
+    scene.push_undo(Some("material"));
     if scene.set_material(index, material) {
-        Some(index)
+    Some(index)
     } else {
         None
     }
@@ -951,7 +1178,7 @@ pub fn set_parent(child: usize, parent: Option<usize>) -> bool {
     let mut guard = PROJECT.lock().unwrap();
     let scene_index = guard.active_scene;
     match guard.scenes.get_mut(scene_index) {
-        Some(scene) => scene.set_parent(child, parent),
+    Some(scene) => scene.change_with_undo(|scene| scene.set_parent(child, parent)),
         None => false,
     }
 }
@@ -961,7 +1188,7 @@ pub fn set_parent_to_bone(child: usize, parent: usize, bone: usize) -> bool {
     let mut guard = PROJECT.lock().unwrap();
     let scene_index = guard.active_scene;
     match guard.scenes.get_mut(scene_index) {
-        Some(scene) => scene.set_parent_to_bone(child, parent, bone),
+    Some(scene) => scene.change_with_undo(|scene| scene.set_parent_to_bone(child, parent, bone)),
         None => false,
     }
 }
@@ -1610,6 +1837,94 @@ let mut scene = Scene::default();
         // A rig is neither a camera nor a light.
         assert!(!scene.set_camera(0, camera::Camera::default()));
         assert!(!scene.set_light(0, light::Light::point()));
+    }
+
+    #[test]
+fn undo_brings_back_a_removed_object_and_redo_removes_it_again() {
+        let mut scene = scene_with(3, 2);
+        scene.objects[1].name = String::from("keep");
+        scene.objects[2].name = String::from("gone");
+        assert!(scene.change_with_undo(|scene| scene.remove_object(2)));
+        assert_eq!(scene.objects.len(), 2);
+
+        assert!(scene.undo());
+        assert_eq!(scene.objects.len(), 3);
+        assert_eq!(scene.objects[2].name, "gone");
+        assert_eq!(scene.active_object, 2);
+
+        assert!(scene.redo());
+        assert_eq!(scene.objects.len(), 2);
+        assert!(!scene.redo());
+        assert!(scene.undo());
+        assert!(!scene.undo());
+    }
+
+    #[test]
+    fn a_change_that_does_nothing_leaves_no_undo_step() {
+        let mut scene = scene_with(2, 0);
+        // Object 0 cannot be removed, so nothing changes.
+        assert!(!scene.change_with_undo(|scene| scene.remove_object(0)));
+        assert!(scene.undo_stack.is_empty());
+        assert!(!scene.undo());
+    }
+
+    #[test]
+    fn changes_of_the_same_kind_in_quick_succession_are_one_undo_step() {
+        let mut scene = scene_with(1, 0);
+        scene.push_undo(Some("transform"));
+        scene.objects[0].transform.translation.x = 1.0;
+        // Same kind, straight away: merged into the step above.
+        scene.push_undo(Some("transform"));
+        scene.objects[0].transform.translation.x = 2.0;
+        // A different kind is a new step.
+        scene.push_undo(Some("material"));
+        scene.objects[0].material.roughness = 0.9;
+        assert_eq!(scene.undo_stack.len(), 2);
+
+        assert!(scene.undo());
+        assert_eq!(scene.objects[0].transform.translation.x, 2.0);
+        assert_eq!(scene.objects[0].material, material::Material::default());
+        assert!(scene.undo());
+        assert_eq!(scene.objects[0].transform.translation.x, 0.0);
+        assert!(!scene.undo());
+    }
+
+    #[test]
+    fn the_undo_history_keeps_only_the_most_recent_states() {
+        let mut scene = scene_with(1, 0);
+        for _ in 0..40 {
+            scene.push_undo(None);
+        }
+        assert_eq!(scene.undo_stack.len(), 30);
+    }
+
+    #[test]
+    fn set_mesh_keeps_the_shared_mesh_and_refuses_unknown_objects() {
+    let mut scene = scene_with(2, 0);
+        let mesh = std::sync::Arc::new(crate::geometry::mesh::MeshData::default());
+        assert!(scene.objects[1].mesh.is_none());
+        assert!(scene.set_mesh(1, mesh.clone()));
+        let kept = scene.objects[1].mesh.as_ref().expect("the mesh was kept");
+        assert!(std::sync::Arc::ptr_eq(kept, &mesh));
+        assert!(!scene.set_mesh(9, mesh));
+    }
+
+    #[test]
+    fn push_object_gives_every_object_its_own_id_and_never_reuses_one() {
+        let mut scene = Scene::default();
+        assert_eq!(scene.push_object(Object::default()), 0);
+        assert_eq!(scene.push_object(Object::default()), 1);
+        let first = scene.objects[0].id;
+        let second = scene.objects[1].id;
+        assert!(first != 0 && second != 0 && first != second);
+        assert_eq!(scene.index_of_id(second), Some(1));
+
+        // Removing an object does not free its id for the next one.
+        scene.push_object(Object::default());
+        assert!(scene.remove_object(2));
+        let next = scene.push_object(Object::default());
+        assert!(scene.objects[next].id > second);
+        assert_eq!(scene.index_of_id(second), Some(1));
     }
 
     #[test]

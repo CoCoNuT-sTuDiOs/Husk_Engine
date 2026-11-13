@@ -66,7 +66,6 @@ class _ViewportPaneState extends State<ViewportPane> {
   (double, double, double) _scaleStart = (1, 1, 1);
   List<(double, double, double)> _scaleAxes = const [];
   Offset _scaleOrigin = Offset.zero;
-  double _scaleStartDistance = 0;
   double _scaleRatio = 1;
 
   // The arrow to light up: the one under the cursor, or the one dragged.
@@ -344,8 +343,7 @@ class _ViewportPaneState extends State<ViewportPane> {
     if (handle == ViewportController.uniformScaleHandle) {
       final origin = _viewport.screenPoint(position);
       if (origin == null) return;
-      _scaleOrigin = origin;
-      _scaleStartDistance = (Offset(x, y) - origin).distance;
+    _scaleOrigin = Offset(x, y);
     } else {
       final param = _viewport.axisParam(
         position,
@@ -373,12 +371,12 @@ class _ViewportPaneState extends State<ViewportPane> {
   void _updateScaleDrag(int handle, double x, double y) {
     final (sx, sy, sz) = _scaleStart;
     if (handle == ViewportController.uniformScaleHandle) {
-      final distance = (Offset(x, y) - _scaleOrigin).distance;
-      // Every 100 panel pixels outward doubles the size, moving back in
-      // shrinks it, and it never goes below 1 percent of where it began.
+      final dragged = (x - _scaleOrigin.dx) * _scaleRatio;
+    // Every 100 panel pixels to the right doubles the size and every 100 to
+    // the left halves it, so it shrinks as easily as it grows.
       final factor = math.max(
         0.01,
-        1 + (distance - _scaleStartDistance) * _scaleRatio / 100,
+      math.pow(2, dragged / 100).toDouble(),
       );
       _studio.setActiveScale((sx * factor, sy * factor, sz * factor));
       return;
@@ -391,7 +389,7 @@ class _ViewportPaneState extends State<ViewportPane> {
       directions: _scaleAxes,
     );
     if (param == null) return;
-    final factor = param / _gizmoStartParam;
+    final factor = math.max(0.01, param / _gizmoStartParam);
     _studio.setActiveScale((
       handle == 0 ? sx * factor : sx,
       handle == 1 ? sy * factor : sy,

@@ -7,7 +7,7 @@ void main() {
     final seen = <String>{};
     for (final binding in keyBindings) {
       for (final key in binding.keys) {
-        final id = '${binding.ctrl}-${key.keyId}';
+        final id = '${binding.ctrl}-${binding.shift}-${key.keyId}';
         expect(seen.add(id), isTrue, reason: 'bound twice: $id');
       }
     }
@@ -48,7 +48,31 @@ void main() {
     expect(commandFor(LogicalKeyboardKey.space), HuskCommand.togglePlay);
     expect(
       commandFor(LogicalKeyboardKey.space, ctrl: true),
-      HuskCommand.toggleMaximize,
+HuskCommand.toggleMaximize,
     );
+  });
+
+  test('Shift picks redo, and Shift alone does not stop other keys', () {
+    HuskCommand? commandFor(
+      LogicalKeyboardKey key, {
+      bool ctrl = false,
+      bool shift = false,
+    }) =>
+        bindingForKey(key, ctrl: ctrl, shift: shift, isRepeat: false)?.command;
+
+    expect(
+      commandFor(LogicalKeyboardKey.keyZ, ctrl: true),
+      HuskCommand.undo,
+    );
+    expect(
+      commandFor(LogicalKeyboardKey.keyZ, ctrl: true, shift: true),
+      HuskCommand.redo,
+    );
+    // + is typed with Shift on many keyboards and must still zoom.
+    expect(
+      commandFor(LogicalKeyboardKey.add, shift: true),
+      HuskCommand.zoomIn,
+    );
+    expect(commandFor(LogicalKeyboardKey.keyZ, shift: true), isNull);
   });
 }

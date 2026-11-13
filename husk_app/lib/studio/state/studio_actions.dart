@@ -46,9 +46,17 @@ class StudioActions {
   }
 
   // Edit
-  void undoBone(BuildContext context) =>
-      showMessage(context, studio.undoLastBone());
+void undo(BuildContext context) {
+    final message = studio.undoEdit();
+    timeline.reloadKeys();
+    if (message != null) showMessage(context, message);
+  }
 
+  void redo(BuildContext context) {
+    final message = studio.redoEdit();
+    timeline.reloadKeys();
+    if (message != null) showMessage(context, message);
+  }
   void toggleCameraView(BuildContext context) =>
       showMessage(context, studio.toggleCameraView());
 
@@ -189,8 +197,10 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
         save(context);
       case HuskCommand.load:
         load(context);
-      case HuskCommand.undoBone:
-        undoBone(context);
+        case HuskCommand.undo:
+        undo(context);
+      case HuskCommand.redo:
+        redo(context);
       case HuskCommand.deleteObject:
         deleteObject(context);
       case HuskCommand.zoomIn:

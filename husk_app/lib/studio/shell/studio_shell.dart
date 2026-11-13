@@ -72,7 +72,8 @@ class _StudioShellState extends State<StudioShell> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
     final binding = bindingForKey(
       event.logicalKey,
-      ctrl: HardwareKeyboard.instance.isControlPressed,
+    ctrl: HardwareKeyboard.instance.isControlPressed,
+      shift: HardwareKeyboard.instance.isShiftPressed,
       isRepeat: event is KeyRepeatEvent,
     );
     if (binding == null) return false;

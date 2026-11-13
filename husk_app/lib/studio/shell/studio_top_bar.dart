@@ -66,8 +66,13 @@ class StudioTopBar extends StatelessWidget {
                       menuChildren: [
                         MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+Z'),
-                          onPressed: () => actions.undoBone(context),
-                          child: const Text('Undo last bone'),
+                          onPressed: () => actions.undo(context),
+                        child: const Text('Undo'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+Shift+Z'),
+                          onPressed: () => actions.redo(context),
+                          child: const Text('Redo'),
                         ),
                          MenuItemButton(
                           trailingIcon: _shortcut('Delete'),

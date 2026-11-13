@@ -336,7 +336,7 @@ struct RenderObject {
     bind_group: wgpu::BindGroup,
     bone_matrices_buffer: wgpu::Buffer,
     bone_bind_group: wgpu::BindGroup,
-    mesh_data: crate::geometry::mesh::MeshData,
+    mesh_data: std::sync::Arc<crate::geometry::mesh::MeshData>,
     model: glam::Mat4,
     base_color: [f32; 4],
     // Roughness, metalness and two unused values, as the shader reads them.
@@ -883,10 +883,11 @@ impl Renderer {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
         bone_bind_group_layout: &wgpu::BindGroupLayout,
-        mesh: crate::geometry::mesh::MeshData,
+        mesh: impl Into<std::sync::Arc<crate::geometry::mesh::MeshData>>,
         model: glam::Mat4,
         base_color: [f32; 4],
     ) -> RenderObject {
+    let mesh: std::sync::Arc<crate::geometry::mesh::MeshData> = mesh.into();
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("husk_scene_uniform_buffer"),
             size: std::mem::size_of::<SceneUniform>() as u64,
@@ -1650,8 +1651,18 @@ impl Renderer {
         self.last_frame.len()
     }
 
+    /// The mesh the object at `index` is drawn from, as a shared handle: the
+    /// scene keeps one, so the mesh outlives this object's GPU buffers. None
+    /// if there is no such object.
+    pub fn object_mesh(
+        &self,
+        index: usize,
+    ) -> Option<std::sync::Arc<crate::geometry::mesh::MeshData>> {
+        self.objects.get(index).map(|object| object.mesh_data.clone())
+    }
+
     pub fn mesh_positions(&self) -> &[[f32; 3]] {
-        &self.objects[self.active_object].mesh_data.positions
+    &self.objects[self.active_object].mesh_data.positions
     }
 
     /// The active mesh's triangle indices (three per triangle), needed to
@@ -1660,8 +1671,20 @@ impl Renderer {
         &self.objects[self.active_object].mesh_data.indices
     }
 
-    pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeights]) {
-        let object = &self.objects[self.active_object];
+pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeights]) {
+        self.update_object_vertex_weights(self.active_object, weights);
+    }
+
+    /// Writes skin weights into the vertex buffer of the object at `index`.
+    /// Does nothing for an unknown object.
+    pub fn update_object_vertex_weights(
+        &self,
+        index: usize,
+        weights: &[crate::rig::skinning::VertexWeights],
+    ) {
+        let Some(object) = self.objects.get(index) else {
+            return;
+        };
         let updated: Vec<Vertex> = object
             .mesh_data
             .positions
@@ -1678,6 +1701,35 @@ impl Renderer {
 
         self.queue
             .write_buffer(&object.vertex_buffer, 0, bytemuck::cast_slice(&updated));
+    }
+
+        /// Throws away every drawn object and makes them again from `states`, in
+/// order: how undo and redo bring the drawing back in step with the scene.
+    /// Object `active` becomes the one the tools act on.
+    pub fn rebuild_objects(&mut self, states: Vec<crate::scene::DrawState>, active: usize) {
+        self.objects.clear();
+        for state in states {
+            let mesh = state.mesh.unwrap_or_default();
+            let colour = state.material.base_color;
+            let mut object = Self::create_object(
+                &self.device,
+                &self.bind_group_layout,
+                &self.bone_bind_group_layout,
+                mesh,
+                state.model,
+                [colour[0], colour[1], colour[2], 1.0],
+            );
+            object.material = state.material.shader_values();
+            self.objects.push(object);
+            let index = self.objects.len() - 1;
+            if let Some(weights) = &state.weights {
+                self.update_object_vertex_weights(index, weights);
+            }
+            if let Some(skinning) = &state.skinning {
+                self.set_object_bone_matrices(index, skinning);
+            }
+        }
+        self.active_object = active.min(self.objects.len().saturating_sub(1));
     }
 
     pub fn set_object_bone_matrices(&self, index: usize, matrices: &[glam::Mat4]) {

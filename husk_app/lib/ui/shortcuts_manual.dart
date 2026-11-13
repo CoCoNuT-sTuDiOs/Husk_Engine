@@ -34,7 +34,8 @@ const List<ShortcutSection> shortcutSections = [
     ShortcutEntry('Ctrl+O', 'Load a project'),
   ]),
   ShortcutSection('Edit', [
-    ShortcutEntry('Ctrl+Z', 'Undo the last bone you placed'),
+    ShortcutEntry('Ctrl+Z', 'Undo the last change to the scene'),
+    ShortcutEntry('Ctrl+Shift+Z', 'Redo what you undid'),
     ShortcutEntry('Delete', 'Delete the active object'),
   ]),
   ShortcutSection('Move around the view', [

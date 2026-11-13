@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`, `push_scene_models`
+// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`, `push_scene_models`, `rebuild_renderer_from_scene`, `share_mesh_with_scene`
 
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
@@ -183,14 +183,8 @@ bool toggleOrthographic() =>
 void panCamera({required double dx, required double dy}) =>
     RustLib.instance.api.crateApiSimplePanCamera(dx: dx, dy: dy);
 
-/// Moves the viewport camera to see every object that has geometry, as
-/// Blender's Frame All (the Home key) does. Returns false, changing nothing,
-/// when no object has any.
 bool frameAll() => RustLib.instance.api.crateApiSimpleFrameAll();
 
-/// Moves the viewport camera to see the active object, as Blender's Frame
-/// Selected (the numpad period key) does. Returns false, changing nothing,
-/// when the active object has no geometry.
 bool frameSelected() => RustLib.instance.api.crateApiSimpleFrameSelected();
 
 /// Orbits the camera by the given angle deltas (radians) around its
@@ -235,10 +229,6 @@ BigInt? removeActiveObject() =>
 bool selectObject({required BigInt index}) =>
     RustLib.instance.api.crateApiSimpleSelectObject(index: index);
 
-/// Locks or unlocks the object at `index`. A locked object cannot be
-/// clicked in the viewport, moved, rotated, scaled or deleted; it still
-/// draws and plays its animation. False, changing nothing, for an unknown
-/// index.
 bool setObjectLocked({required BigInt index, required bool locked}) => RustLib
     .instance
     .api
@@ -456,6 +446,14 @@ void refreshModels() => RustLib.instance.api.crateApiSimpleRefreshModels();
 /// Returns (true, summary) or (false, reason).
 (bool, String) importGlb({required String path}) =>
     RustLib.instance.api.crateApiSimpleImportGlb(path: path);
+
+/// Goes back to the state before the last change to the scene. False,
+/// changing nothing, when there is nothing to undo.
+bool undoEdit() => RustLib.instance.api.crateApiSimpleUndoEdit();
+
+/// Goes forward again after an undo. False, changing nothing, when there is
+/// nothing to redo.
+bool redoEdit() => RustLib.instance.api.crateApiSimpleRedoEdit();
 
 /// The scene's world.
 WorldSettings worldSettings() =>

@@ -392,6 +392,29 @@ final (removed, parent) = rust.undoLastBone();
     return null;
   }
 
+/// Goes back one step in the scene's undo history (kept in the Rust core).
+  /// Returns a message when there is nothing to undo.
+  String? undoEdit() {
+    if (!rust.undoEdit()) return 'Nothing to undo';
+    _afterHistoryStep();
+    return null;
+  }
+
+  /// Goes forward again after an undo. Returns a message when there is
+  /// nothing to redo.
+  String? redoEdit() {
+    if (!rust.redoEdit()) return 'Nothing to redo';
+    _afterHistoryStep();
+    return null;
+  }
+
+  /// What undo and redo leave behind: a joint selected before means nothing
+  /// now, and every panel reads the scene again.
+  void _afterHistoryStep() {
+    _selectedBone = null;
+    notifyListeners();
+  }
+
   /// Computes skin weights for the current skeleton. Returns a message.
   String computeWeights() {
     final timer = Stopwatch()..start();

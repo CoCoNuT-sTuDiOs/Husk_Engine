@@ -8,8 +8,9 @@ import 'package:flutter/services.dart';
 enum HuskCommand {
   save,
   load,
-  undoBone,
   deleteObject,
+  undo,
+  redo,
   zoomIn,
   zoomOut,
   frameAll,
@@ -35,6 +36,7 @@ class KeyBinding {
     this.command,
     this.keys, {
     this.ctrl = false,
+    this.shift = false,
     this.repeats = false,
     this.whileTyping = false,
   });
@@ -46,6 +48,10 @@ class KeyBinding {
 
   /// True when Ctrl must be held, false when it must not be.
   final bool ctrl;
+
+  /// True when Shift must be held. Otherwise Shift is ignored, unless another
+  /// row for the same key needs it (Undo is Ctrl+Z, Redo is Ctrl+Shift+Z).
+  final bool shift;
 
   /// True when holding the key down keeps running the command.
   final bool repeats;
@@ -69,62 +75,61 @@ const List<KeyBinding> keyBindings = [
     whileTyping: true,
   ),
   KeyBinding(
-    HuskCommand.undoBone,
+    HuskCommand.undo,
     [LogicalKeyboardKey.keyZ],
     ctrl: true,
     repeats: true,
   ),
+  KeyBinding(
+    HuskCommand.redo,
+    [LogicalKeyboardKey.keyZ],
+    ctrl: true,
+    shift: true,
+    repeats: true,
+  ),
   KeyBinding(HuskCommand.deleteObject, [LogicalKeyboardKey.delete]),
-  KeyBinding(
-    HuskCommand.zoomOut,
-    [LogicalKeyboardKey.minus, LogicalKeyboardKey.numpadSubtract],
-    repeats: true,
-  ),
-  KeyBinding(
-    HuskCommand.zoomIn,
-    [
-      LogicalKeyboardKey.equal,
-      LogicalKeyboardKey.add,
-      LogicalKeyboardKey.numpadAdd,
-    ],
-    repeats: true,
-  ),
+  KeyBinding(HuskCommand.zoomOut, [
+    LogicalKeyboardKey.minus,
+    LogicalKeyboardKey.numpadSubtract,
+  ], repeats: true),
+  KeyBinding(HuskCommand.zoomIn, [
+    LogicalKeyboardKey.equal,
+    LogicalKeyboardKey.add,
+    LogicalKeyboardKey.numpadAdd,
+  ], repeats: true),
   KeyBinding(HuskCommand.frameAll, [LogicalKeyboardKey.home]),
-  KeyBinding(
-    HuskCommand.frameSelected,
-    [LogicalKeyboardKey.numpadDecimal, LogicalKeyboardKey.period],
-  ),
-  KeyBinding(
-    HuskCommand.viewFront,
-    [LogicalKeyboardKey.digit1, LogicalKeyboardKey.numpad1],
-  ),
-  KeyBinding(
-    HuskCommand.viewBack,
-    [LogicalKeyboardKey.digit1, LogicalKeyboardKey.numpad1],
-    ctrl: true,
-  ),
-  KeyBinding(
-    HuskCommand.viewRight,
-    [LogicalKeyboardKey.digit3, LogicalKeyboardKey.numpad3],
-  ),
-  KeyBinding(
-    HuskCommand.viewLeft,
-    [LogicalKeyboardKey.digit3, LogicalKeyboardKey.numpad3],
-    ctrl: true,
-  ),
-  KeyBinding(
-    HuskCommand.viewTop,
-    [LogicalKeyboardKey.digit7, LogicalKeyboardKey.numpad7],
-  ),
-  KeyBinding(
-    HuskCommand.viewBottom,
-    [LogicalKeyboardKey.digit7, LogicalKeyboardKey.numpad7],
-    ctrl: true,
-  ),
-  KeyBinding(
-    HuskCommand.toggleOrthographic,
-    [LogicalKeyboardKey.digit5, LogicalKeyboardKey.numpad5],
-  ),
+  KeyBinding(HuskCommand.frameSelected, [
+    LogicalKeyboardKey.numpadDecimal,
+    LogicalKeyboardKey.period,
+  ]),
+  KeyBinding(HuskCommand.viewFront, [
+    LogicalKeyboardKey.digit1,
+    LogicalKeyboardKey.numpad1,
+  ]),
+  KeyBinding(HuskCommand.viewBack, [
+    LogicalKeyboardKey.digit1,
+    LogicalKeyboardKey.numpad1,
+  ], ctrl: true),
+  KeyBinding(HuskCommand.viewRight, [
+    LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.numpad3,
+  ]),
+  KeyBinding(HuskCommand.viewLeft, [
+    LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.numpad3,
+  ], ctrl: true),
+  KeyBinding(HuskCommand.viewTop, [
+    LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.numpad7,
+  ]),
+  KeyBinding(HuskCommand.viewBottom, [
+    LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.numpad7,
+  ], ctrl: true),
+  KeyBinding(HuskCommand.toggleOrthographic, [
+    LogicalKeyboardKey.digit5,
+    LogicalKeyboardKey.numpad5,
+  ]),
   KeyBinding(HuskCommand.togglePlay, [LogicalKeyboardKey.space]),
   KeyBinding(HuskCommand.toolMoveObject, [LogicalKeyboardKey.keyG]),
   KeyBinding(HuskCommand.toolRotateObject, [LogicalKeyboardKey.keyR]),
@@ -147,12 +152,16 @@ const List<KeyBinding> keyBindings = [
 KeyBinding? bindingForKey(
   LogicalKeyboardKey key, {
   required bool ctrl,
+  bool shift = false,
   required bool isRepeat,
 }) {
+  KeyBinding? ignoringShift;
   for (final binding in keyBindings) {
     if (binding.ctrl != ctrl) continue;
     if (isRepeat && !binding.repeats) continue;
-    if (binding.keys.contains(key)) return binding;
+    if (!binding.keys.contains(key)) continue;
+    if (binding.shift == shift) return binding;
+    if (!binding.shift) ignoringShift ??= binding;
   }
-  return null;
+  return ignoringShift;
 }

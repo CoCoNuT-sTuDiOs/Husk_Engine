@@ -46,6 +46,7 @@ pub fn place_bone(x: f64, y: f64, parent: Option<usize>) -> Option<(usize, f32, 
         })
         .flatten()?
     };
+    crate::scene::push_undo(None);
     let mut active = crate::scene::active_object();
     let skeleton = &mut active.skeleton;
     let local_position = match parent {
@@ -103,6 +104,7 @@ pub fn compute_weights() -> bool {
     match computed {
         Some(weights) => {
             crate::platform::ffi::with_active_renderer(|renderer| renderer.update_vertex_weights(&weights));
+            crate::scene::push_undo(None);
             crate::scene::active_object().weights = Some(weights);
             true
         }
@@ -161,6 +163,7 @@ pub fn rotate_bone(bone_index: usize, angle_degrees: f32) -> bool {
 /// root joints, bad indices, or when there's no active renderer.
 #[flutter_rust_bridge::frb(sync)]
 pub fn drag_bone(bone_index: usize, x: f64, y: f64) -> bool {
+    crate::scene::push_undo(Some("pose"));
     // Joints live in the object's own space; the cursor and the camera's
     // drag plane are in the scene. Taken before any scene lock.
     let space = crate::scene::active_transform().1;
@@ -202,6 +205,7 @@ renderer.screen_to_view_plane(x as f32, y as f32, space.point_to_world(joint_pos
 /// grandparent, or there's no active renderer.
 #[flutter_rust_bridge::frb(sync)]
 pub fn drag_limb(bone_index: usize, x: f64, y: f64) -> bool {
+    crate::scene::push_undo(Some("pose"));
     // Joints live in the object's own space; the cursor and the camera's
     // drag plane are in the scene. Taken before any scene lock.
     let space = crate::scene::active_transform().1;
@@ -278,8 +282,9 @@ pub fn add_keyframe(time: f32) -> usize {
     // Everything that is not a bone (placement, look, lens, light) is keyed
     // at the same moment as the pose. The lock is released before the next
     // line takes it again.
+crate::scene::push_undo(None);
     crate::scene::active_object().key_channels(time);
-let mut active = crate::scene::active_object();
+    let mut active = crate::scene::active_object();
     let crate::scene::Object { skeleton, pose, timeline, .. } = &mut *active;
     pose.ensure_covers(&skeleton);
     let rotations: Vec<glam::Quat> = pose
@@ -302,6 +307,13 @@ pub fn keyframe_times() -> Vec<f32> {
 /// Returns whether a key was removed.
 #[flutter_rust_bridge::frb(sync)]
 pub fn delete_keyframe_at(time: f32) -> bool {
+let has_key = crate::scene::active_object()
+        .key_times()
+        .iter()
+        .any(|key| (key - time).abs() <= 0.05);
+    if has_key {
+        crate::scene::push_undo(None);
+    }
     crate::scene::active_object().remove_keys_near(time, 0.05)
 }
 
@@ -363,6 +375,7 @@ pub fn repeat_period() -> Option<f32> {
 /// Returns false if there is no skeleton or no active renderer.
 #[flutter_rust_bridge::frb(sync)]
 pub fn move_character(x: f64, y: f64) -> bool {
+    crate::scene::push_undo(Some("pose"));
     // The root offset lives in the object's own space; the cursor and the
     // camera's drag plane are in the scene. Taken before any scene lock.
     let space = crate::scene::active_transform().1;
@@ -481,6 +494,7 @@ pub fn load_project(path: String) -> (bool, String) {
         );
     }
 
+crate::scene::push_undo(None);
     // Skin weights go to the GPU; a project saved without any gets the
     // plain default (everything on bone 0).
     let gpu_weights: Vec<crate::rig::skinning::VertexWeights> = match &project.weights {
@@ -550,6 +564,7 @@ pub fn bone_parents() -> Vec<Option<usize>> {
 /// start placing bones over from a clean state.
 #[flutter_rust_bridge::frb(sync)]
 pub fn reset_skeleton() {
+    crate::scene::push_undo(None);
     {
         let mut active = crate::scene::active_object();
         let name = std::mem::take(&mut active.name);
@@ -557,12 +572,20 @@ pub fn reset_skeleton() {
         let material = active.material;
         let kind = active.kind;
         let channels = std::mem::take(&mut active.channels);
+        let id = active.id;
+        let parent = active.parent;
+        let locked = active.locked;
+        let mesh = active.mesh.clone();
         *active = crate::scene::Object {
             name,
             transform,
             material,
             kind,
             channels,
+            id,
+            parent,
+            locked,
+            mesh,
             ..crate::scene::Object::default()
         };
 
@@ -664,8 +687,9 @@ pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
         },
         crate::scene::ObjectKind::Mesh,
     );
-            if scene_index != render_index {
-        eprintln!(
+    share_mesh_with_scene(render_index);
+    if scene_index != render_index {
+    eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
     }
@@ -1034,7 +1058,8 @@ pub fn add_camera() -> Option<usize> {
         },
         crate::scene::ObjectKind::Camera(crate::scene::camera::Camera::default()),
     );
-    if scene_index != render_index {
+    share_mesh_with_scene(render_index);
+        if scene_index != render_index {
         eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
@@ -1060,7 +1085,8 @@ pub fn add_rig() -> Option<usize> {
         },
         crate::scene::ObjectKind::Rig,
     );
-    if scene_index != render_index {
+    share_mesh_with_scene(render_index);
+        if scene_index != render_index {
         eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
@@ -1082,6 +1108,9 @@ pub fn active_camera_fov() -> Option<f32> {
 pub fn set_active_camera_fov(degrees: f32) -> bool {
     if !degrees.is_finite() {
         return false;
+    }
+    if crate::scene::active_camera().is_some() {
+        crate::scene::push_undo(Some("lens"));
     }
     let applied = crate::scene::set_active_camera(
         crate::scene::camera::Camera {
@@ -1125,7 +1154,8 @@ pub fn add_light(kind: String) -> Option<usize> {
         },
         crate::scene::ObjectKind::Light(light),
     );
-    if scene_index != render_index {
+    share_mesh_with_scene(render_index);
+        if scene_index != render_index {
         eprintln!(
             "Husk: scene has object {scene_index} but the renderer has {render_index}; the two lists are out of step"
         );
@@ -1168,8 +1198,9 @@ pub fn set_active_light(color: (f32, f32, f32), intensity: f32) -> bool {
     let Some(current) = crate::scene::active_light() else {
         return false;
     };
+crate::scene::push_undo(Some("light"));
     let applied = crate::scene::set_active_light(
-        crate::scene::light::Light {
+    crate::scene::light::Light {
             kind: current.kind,
             color: [color.0, color.1, color.2],
             intensity,
@@ -1290,6 +1321,8 @@ pub fn import_glb(path: String) -> (bool, String) {
         );
     }
 
+    share_mesh_with_scene(render_index);
+
     // The new object becomes the active one, so the weights below and every
     // tool act on it.
     crate::scene::set_active_object(render_index);
@@ -1325,6 +1358,50 @@ pub fn import_glb(path: String) -> (bool, String) {
         true,
         format!("Imported {name}: {vertex_count} vertices{rig_text}{size_text}{note}"),
     )
+}
+
+/// Gives the scene object at `index` the same mesh the renderer draws that
+/// object from. Both hold a handle to the same data, so nothing is copied.
+fn share_mesh_with_scene(index: usize) {
+    let mesh = crate::platform::ffi::with_active_renderer(|renderer| renderer.object_mesh(index))
+        .flatten();
+    if let Some(mesh) = mesh {
+        crate::scene::set_object_mesh(index, mesh);
+    }
+}
+
+/// Brings the renderer in step with the scene from scratch: every object is
+/// drawn again from what the scene holds. Undo and redo use it, because they
+/// can add, remove and change any object at once.
+fn rebuild_renderer_from_scene() {
+    let (states, active) = crate::scene::draw_states();
+    crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.rebuild_objects(states, active)
+    });
+    push_scene_camera();
+    push_scene_lights();
+}
+
+/// Goes back to the state before the last change to the scene. False,
+/// changing nothing, when there is nothing to undo.
+#[flutter_rust_bridge::frb(sync)]
+pub fn undo_edit() -> bool {
+    if !crate::scene::undo() {
+        return false;
+    }
+    rebuild_renderer_from_scene();
+    true
+}
+
+/// Goes forward again after an undo. False, changing nothing, when there is
+/// nothing to redo.
+#[flutter_rust_bridge::frb(sync)]
+pub fn redo_edit() -> bool {
+    if !crate::scene::redo() {
+        return false;
+    }
+    rebuild_renderer_from_scene();
+    true
 }
 
 /// Tells the renderer where every object is drawn: its world placement,
