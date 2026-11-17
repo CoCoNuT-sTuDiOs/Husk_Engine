@@ -108,7 +108,25 @@ class ViewportToolStrip extends StatelessWidget {
               ),
               const SizedBox(width: 18),
               ..._options(context, studio),
-              const Spacer(),
+            const Spacer(),
+              Tooltip(
+                message:
+                    'Snap to surface: shapes you drop, and the active object '
+                    'you drag with Move object, stick to the surface under '
+                    'the cursor',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Snap', style: HuskText.readout),
+                    const SizedBox(width: 6),
+                    Switch(
+                      value: studio.snapToSurface,
+                      onChanged: (_) => studio.toggleSnapToSurface(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
               IconAction(
                 selected: studio.cameraView,
                 icon: PhosphorIcon(PhosphorIconsRegular.videoCamera),

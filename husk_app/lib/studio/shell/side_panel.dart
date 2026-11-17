@@ -13,6 +13,28 @@ class SidePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+final studio = actions.studio;
+    if (studio.sidePanelCollapsed) {
+      return Container(
+        width: 20,
+        decoration: const BoxDecoration(
+          color: HuskColors.panel,
+          border: Border(left: BorderSide(color: HuskColors.border)),
+        ),
+        alignment: Alignment.topCenter,
+        child: IconButton(
+          tooltip: 'Show side panel (N)',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 20, height: 28),
+          icon: const Icon(
+            Icons.chevron_left,
+            size: 16,
+            color: HuskColors.textSecondary,
+          ),
+          onPressed: studio.toggleSidePanelCollapsed,
+        ),
+      );
+    }
     return Container(
       width: 300,
       decoration: const BoxDecoration(
@@ -22,7 +44,23 @@ class SidePanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const PanelHeader(title: 'Outliner'),
+        PanelHeader(
+            title: 'Outliner',
+            trailing: IconButton(
+              tooltip: 'Hide side panel (N)',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(
+                width: 24,
+                height: 24,
+              ),
+              icon: const Icon(
+                Icons.chevron_right,
+                size: 16,
+                color: HuskColors.textSecondary,
+              ),
+              onPressed: studio.toggleSidePanelCollapsed,
+            ),
+          ),
            Expanded(child: OutlinerPanel(actions: actions)),
           const PanelHeader(title: 'Properties'),
           Expanded(

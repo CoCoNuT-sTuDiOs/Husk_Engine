@@ -1,0 +1,38 @@
+Husk
+Copyright (C) 2026 CoCoNuTsTuDiOs{Darwin}
+
+Husk is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See the file LICENSE.
+
+Husk is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+
+PORTED FROM BLENDER
+
+Some behaviour in Husk is ported from Blender (https://www.blender.org),
+Copyright Blender Authors, licensed under GPL-2.0-or-later. Each ported piece
+is marked in its source file:
+
+husk_core/src/render/renderer.rs
+  pan_offset: from viewmove_apply (view3d_navigate.cc), ED_view3d_win_to_delta
+    (view3d_project.cc) and ED_view3d_calc_zfac.
+  orthographic_after_rotating: from ED_view3d_persp_ensure (view3d_utils.cc).
+  radius_to_dist: from ED_view3d_radius_to_dist (view3d_utils.cc).
+  frame_bounds: from view3d_from_minmax (view3d_navigate_view_all.cc).
+  The test that checks the six standard views uses the rotations from
+    view3d_quat_axis (view3d_utils.cc).
+
+
+THIRD-PARTY LIBRARIES
+
+Husk is built with these libraries, each under its own licence (see each
+project):
+  Rust: wgpu, glam, gltf, serde, serde_json, bytemuck, pollster,
+    flutter_rust_bridge
+  Flutter and Dart: Flutter, file_selector, phosphor_icons
+
+Sample models used in tests keep their own licences.

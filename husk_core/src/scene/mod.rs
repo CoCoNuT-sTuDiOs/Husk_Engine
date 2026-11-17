@@ -254,7 +254,7 @@ pub struct Scene {
     /// The space around the objects: background and studio light.
     pub world: world::World,
     /// The id the next object that needs one gets.
-pub next_id: u64,
+    pub next_id: u64,
     /// Saved states to go back to, oldest first (see `Scene::push_undo`).
     pub undo_stack: Vec<Snapshot>,
     /// States that were undone, which redo brings back.
@@ -263,6 +263,13 @@ pub next_id: u64,
     /// so a drag or a slider scrub that changes the same thing many times in
     /// a row is one step.
     pub last_edit: Option<(&'static str, usize, std::time::Instant)>,
+    /// Goes up with every change to the scene.
+    pub revision: u64,
+    /// The `revision` the last recovery copy (or save) was made at.
+    pub autosaved_revision: u64,
+    /// The `revision` the project was last saved at. Differing from `revision`
+    /// means there are changes that are not in a project file.
+    pub saved_revision: u64,
 }
 
 impl Scene {
@@ -301,6 +308,7 @@ impl Scene {
     /// of the last one is part of the same step (a drag changes the same
     /// thing dozens of times), so nothing new is saved. `None` always saves.
     pub fn push_undo(&mut self, kind: Option<&'static str>) {
+        self.revision += 1;      
         let now = std::time::Instant::now();
         if let (Some(kind), Some((last_kind, last_active, at))) = (kind, self.last_edit) {
             if kind == last_kind
@@ -337,7 +345,8 @@ impl Scene {
     /// Goes back to the last saved state. False, changing nothing, when
     /// there is none.
     pub fn undo(&mut self) -> bool {
-        let Some(previous) = self.undo_stack.pop() else {
+        self.revision += 1;
+       let Some(previous) = self.undo_stack.pop() else {
             return false;
         };
         let current = self.snapshot();
@@ -350,7 +359,8 @@ impl Scene {
     /// Goes forward again after an undo. False, changing nothing, when
     /// there is nothing to redo.
     pub fn redo(&mut self) -> bool {
-        let Some(next) = self.redo_stack.pop() else {
+        self.revision += 1;
+      let Some(next) = self.redo_stack.pop() else {
             return false;
         };
         let current = self.snapshot();
@@ -385,6 +395,51 @@ impl Scene {
                 }
             })
             .collect()
+    }
+
+    /// The name a copy of `name` gets: the name without any number at its
+    /// end, then the copy's own index, as `add_object` names new objects.
+    fn copy_name(name: &str, index: usize) -> String {
+        let base = name.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end();
+        let base = if base.is_empty() { "Object" } else { base };
+        format!("{base} {index}")
+    }
+
+    /// Adds a copy of `source`, which was at `world` in the scene, as a new
+    /// object just beside it, and makes the copy the active object. It keeps
+    /// the source's parent when that parent is in this scene, so a copy of an
+    /// eye stays on the same head; otherwise it is free and keeps `world`. A
+    /// copy is never locked. Returns its index, or None, changing nothing,
+    /// when the source has no mesh to copy.
+    pub fn add_copy(&mut self, source: &Object, world: transform::Transform) -> Option<usize> {
+        let mesh = source.mesh.clone()?;
+        self.push_undo(None);
+        let mut copy = source.clone();
+        copy.locked = false;
+        let keeps_parent = copy
+            .parent
+            .is_some_and(|link| self.index_of_id(link.parent_id).is_some());
+        if !keeps_parent {
+            copy.parent = None;
+            copy.transform = world;
+        }
+        let index = self.push_object(copy);
+        self.objects[index].name = Self::copy_name(&source.name, index);
+        // Beside the original, so it is not hidden inside it: 60 percent of
+        // the size of its mesh, to the scene's right.
+        let size = mesh_size(&mesh) * world.scale.abs().max_element();
+        let mut placed = self.world_transform(index);
+        placed.translation += glam::Vec3::X * size * 0.6;
+        self.set_world_transform(index, placed);
+        self.active_object = index;
+        Some(index)
+    }
+
+    /// Duplicates the object at `index` (see `add_copy`).
+    pub fn duplicate_object(&mut self, index: usize) -> Option<usize> {
+        let source = self.objects.get(index)?.clone();
+        let world = self.world_transform(index);
+        self.add_copy(&source, world)
     }
 
     /// Gives the object at `index` its mesh. False, changing nothing, for an
@@ -757,6 +812,22 @@ pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
     }
 }
 
+/// The longest side of the box around a mesh, or 1 for a mesh with no points.
+fn mesh_size(mesh: &crate::geometry::mesh::MeshData) -> f32 {
+    let mut low = glam::Vec3::splat(f32::MAX);
+    let mut high = glam::Vec3::splat(f32::MIN);
+    for position in &mesh.positions {
+        let point = glam::Vec3::from(*position);
+        low = low.min(point);
+        high = high.max(point);
+    }
+    if low.x > high.x {
+        1.0
+    } else {
+        (high - low).max_element()
+    }
+}
+
 pub fn active_after_removal(active: usize, removed: usize) -> usize {
     if active == removed {
         0
@@ -961,6 +1032,137 @@ pub fn draw_states() -> (Vec<DrawState>, usize) {
     match guard.scenes.get_mut(scene_index) {
         Some(scene) => (scene.draw_states(), scene.active_object),
         None => (Vec::new(), 0),
+    }
+}
+
+/// What Ctrl+C keeps: a copy of the object and where it was in the scene.
+static CLIPBOARD: RecoveringMutex<Option<(Object, transform::Transform)>> =
+    RecoveringMutex::new(None);
+
+/// Duplicates the active object of the active scene beside itself and makes
+/// the copy the active one. Returns the copy's index.
+pub fn duplicate_active() -> Option<usize> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    let active = scene.active_object;
+    scene.duplicate_object(active)
+}
+
+/// Copies the active object to the clipboard. False, changing nothing, when
+/// it has no mesh to copy.
+pub fn copy_active() -> bool {
+    let copied = {
+        let guard = PROJECT.lock().unwrap();
+        let Some(scene) = guard.scenes.get(guard.active_scene) else {
+            return false;
+        };
+        let active = scene.active_object;
+        scene
+            .objects
+            .get(active)
+            .filter(|object| object.mesh.is_some())
+            .map(|object| (object.clone(), scene.world_transform(active)))
+    };
+    match copied {
+        Some(entry) => {
+            *CLIPBOARD.lock().unwrap() = Some(entry);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Pastes the clipboard into the active scene as a new object and makes it
+/// the active one. Returns its index, or None when the clipboard is empty.
+pub fn paste() -> Option<usize> {
+    let (source, world) = CLIPBOARD.lock().unwrap().clone()?;
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    scene.add_copy(&source, world)
+}
+
+
+/// Writes the recovery copy if the scene changed since the last one. Returns
+/// whether it wrote one.
+pub fn autosave_if_changed() -> Result<bool, String> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let Some(scene) = guard.scenes.get_mut(scene_index) else {
+        return Ok(false);
+    };
+    if scene.revision == scene.autosaved_revision {
+        return Ok(false);
+    }
+    crate::project::recovery::write_recovery(scene)?;
+    scene.autosaved_revision = scene.revision;
+    Ok(true)
+}
+
+/// Starts a fresh, empty scene, as at start-up: one empty object called Model.
+pub fn reset_scene() {
+    let mut scene = Scene::default();
+    scene.push_object(Object {
+        name: String::from("Model"),
+        ..Object::default()
+    });
+    replace_scene(scene);
+}
+
+/// Whether the scene has changes that are not in a saved project file.
+pub fn has_unsaved_changes() -> bool {
+    let guard = PROJECT.lock().unwrap();
+    guard
+        .scenes
+        .get(guard.active_scene)
+        .is_some_and(|scene| scene.revision != scene.saved_revision)
+}
+
+/// Marks the scene as having unsaved changes, as for work recovered from a
+/// recovery copy that is not in any project file yet.
+pub fn mark_unsaved() {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.revision += 1;
+    }
+}
+
+/// Notes that the scene was just saved, so no recovery copy is needed until it
+/// changes again.
+pub fn mark_saved() {
+    {
+        let mut guard = PROJECT.lock().unwrap();
+        let scene_index = guard.active_scene;
+        if let Some(scene) = guard.scenes.get_mut(scene_index) {
+            scene.saved_revision = scene.revision;
+        }
+    }
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    if let Some(scene) = guard.scenes.get_mut(scene_index) {
+        scene.autosaved_revision = scene.revision;
+    }
+}
+
+/// Runs `read` on the active scene while holding the project lock. None when
+/// there is no scene.
+pub fn with_scene<R>(read: impl FnOnce(&Scene) -> R) -> Option<R> {
+    let guard = PROJECT.lock().unwrap();
+    guard.scenes.get(guard.active_scene).map(read)
+}
+
+/// Replaces the active scene with `scene`, as opening a project does. The
+/// undo history goes with the old scene.
+pub fn replace_scene(scene: Scene) {
+    let mut guard = PROJECT.lock().unwrap();
+    if guard.scenes.is_empty() {
+        guard.scenes.push(scene);
+        guard.active_scene = 0;
+    } else {
+        let index = guard.active_scene;
+        guard.scenes[index] = scene;
     }
 }
 
@@ -1245,6 +1447,7 @@ pub fn set_output(settings: output::Output) {
     let scene_index = guard.active_scene;
     if let Some(scene) = guard.scenes.get_mut(scene_index) {
         scene.output = settings;
+        scene.revision += 1;
     }
 }
 
@@ -1264,6 +1467,7 @@ pub fn set_world(settings: world::World) {
     let scene_index = guard.active_scene;
     if let Some(scene) = guard.scenes.get_mut(scene_index) {
         scene.world = settings;
+        scene.revision += 1;
     }
 }
 
@@ -1899,8 +2103,37 @@ fn undo_brings_back_a_removed_object_and_redo_removes_it_again() {
     }
 
     #[test]
+fn a_duplicate_is_a_new_object_beside_the_original_and_keeps_its_parent() {
+        let mut scene = scene_with(3, 0);
+        let mut mesh = crate::geometry::mesh::MeshData::default();
+        mesh.positions = vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        mesh.normals = vec![[0.0, 0.0, 1.0]; 3];
+        mesh.indices = vec![0, 1, 2];
+        assert!(scene.set_mesh(2, std::sync::Arc::new(mesh)));
+        scene.objects[2].name = String::from("Eye 7");
+        scene.objects[2].locked = true;
+        assert!(scene.set_parent(2, Some(1)));
+
+        let copy = scene.duplicate_object(2).expect("it has a mesh");
+        assert_eq!(copy, 3);
+        assert_eq!(scene.objects[copy].name, "Eye 3");
+        assert!(!scene.objects[copy].locked);
+        assert!(scene.objects[copy].id != scene.objects[2].id);
+        assert_eq!(scene.parent_of(copy), Some(1));
+        assert_eq!(scene.active_object, copy);
+        // 60 percent of the mesh's longest side (2), to the right.
+        let moved = scene.world_transform(copy).translation
+            - scene.world_transform(2).translation;
+        assert!((moved - glam::Vec3::new(1.2, 0.0, 0.0)).length() < 1e-4);
+
+        // The empty starting object has no mesh, so there is nothing to copy.
+        assert!(scene.duplicate_object(0).is_none());
+        assert_eq!(scene.objects.len(), 4);
+    }
+
+    #[test]
     fn set_mesh_keeps_the_shared_mesh_and_refuses_unknown_objects() {
-    let mut scene = scene_with(2, 0);
+        let mut scene = scene_with(2, 0);
         let mesh = std::sync::Arc::new(crate::geometry::mesh::MeshData::default());
         assert!(scene.objects[1].mesh.is_none());
         assert!(scene.set_mesh(1, mesh.clone()));

@@ -12,10 +12,6 @@ pub fn plane(size: f32) -> MeshData {
     }
 }
 
-/// A capsule standing along the Y axis, centred on the origin: a
-/// cylinder of `cylinder_height` between two hemispheres of `radius`.
-/// Total height is `cylinder_height + 2 * radius`. `segments` is how many
-/// slices go around the axis, `rings` how many bands each hemisphere has.
 pub fn capsule(radius: f32, cylinder_height: f32, segments: u32, rings: u32) -> MeshData {
     let segments = segments.max(3);
     let rings = rings.max(2);
@@ -23,10 +19,6 @@ pub fn capsule(radius: f32, cylinder_height: f32, segments: u32, rings: u32) -> 
     let row_len = segments + 1;
     let mut mesh = MeshData::default();
 
-    // Rows run from the top pole down to the bottom pole. The top
-    // hemisphere is centred at +half, the bottom one at -half; the last
-    // row of the top and the first row of the bottom are both equators,
-    // and the band between them is the cylinder wall.
     for hemisphere in 0..2 {
         for step in 0..=rings {
             let t = step as f32 / rings as f32 * FRAC_PI_2;
@@ -62,10 +54,6 @@ pub fn capsule(radius: f32, cylinder_height: f32, segments: u32, rings: u32) -> 
     mesh
 }
 
-/// A torus lying flat (hole along the Y axis), centred on the origin.
-/// `major_radius` is the distance from the centre to the middle of the
-/// tube, `minor_radius` the tube's own radius. `major_segments` slices go
-/// around the hole, `minor_segments` around the tube.
 pub fn torus(
     major_radius: f32,
     minor_radius: f32,

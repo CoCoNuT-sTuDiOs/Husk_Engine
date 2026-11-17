@@ -1163,9 +1163,28 @@ impl Renderer {
         mesh: crate::geometry::mesh::MeshData,
         screen_x: f32,
         screen_y: f32,
-        ) -> Option<(usize, glam::Mat4, [f32; 4])> {
-        let centre = self.screen_to_view_plane(screen_x, screen_y, self.orbit_target)?;
-        let positions = &self.objects[0].mesh_data.positions;
+        snap: bool,
+            ) -> Option<(usize, glam::Mat4, [f32; 4])> {
+     // With Snap on and the drop over a surface, the shape sits on that
+        // surface. Otherwise it goes on the plane through the orbit target
+        // that faces the camera.
+        let surface = if snap {
+            self.surface_at(screen_x, screen_y, &[])
+        } else {
+            None
+        };
+        let mut rotation = glam::Quat::IDENTITY;
+        let centre = match surface {
+            Some(hit) => {
+                rotation = crate::scene::transform::align_up_to(
+                    glam::Quat::IDENTITY,
+                    hit.normal,
+                );
+                hit.point
+            }
+            None => self.screen_to_view_plane(screen_x, screen_y, self.orbit_target)?,
+        };
+                let positions = &self.objects[0].mesh_data.positions;
         let mut size = 1.0_f32;
         if !positions.is_empty() {
             let mut bounds_min = glam::Vec3::splat(f32::MAX);
@@ -1178,6 +1197,7 @@ impl Renderer {
             size = (bounds_max - bounds_min).max_element() * 0.25;
         }
         let model = glam::Mat4::from_translation(centre)
+            * glam::Mat4::from_quat(rotation)
             * glam::Mat4::from_scale(glam::Vec3::splat(size));
         let colour = OBJECT_COLORS[self.objects.len() % OBJECT_COLORS.len()];
         let index = self.add_object(mesh, model, colour);
@@ -1647,8 +1667,18 @@ impl Renderer {
         frame_address(&self.last_frame)
     }
 
+     /// The last frame drawn, as (width, height, RGBA pixels). None before the
+    /// first frame.
+    pub fn last_frame_rgba(&self) -> Option<(u32, u32, &[u8])> {
+        if self.last_frame.is_empty() {
+            None
+        } else {
+            Some((self.width, self.height, &self.last_frame))
+        }
+    }
+
     pub fn frame_len(&self) -> usize {
-        self.last_frame.len()
+    self.last_frame.len()
     }
 
     /// The mesh the object at `index` is drawn from, as a shared handle: the
@@ -1982,6 +2012,46 @@ pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeigh
             })
             .collect();
         crate::render::picking::pick_nearest(&ray, &placed)
+    }
+
+    /// The nearest surface under screen pixel (x, y): which object it is, and
+    /// where the ray meets it and which way the surface faces there, in the
+    /// scene. An object whose entry in `skip` is true is left out, so the ray
+    /// goes through it (the object being dragged, say). Uses the camera from
+    /// the last rendered frame and tests the objects' rest shapes.
+    pub fn surface_at(
+        &self,
+        screen_x: f32,
+        screen_y: f32,
+        skip: &[bool],
+    ) -> Option<crate::render::picking::SurfaceHit> {
+        let ray = crate::render::picking::Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            self.last_view_proj,
+        );
+        let nothing: &[[f32; 3]] = &[];
+        let no_indices: &[u32] = &[];
+        let placed: Vec<(glam::Mat4, &[[f32; 3]], &[[f32; 3]], &[u32])> = self
+            .objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| {
+                if skip.get(index).copied().unwrap_or(false) {
+                    (object.model, nothing, nothing, no_indices)
+                } else {
+                    (
+                        object.model,
+                        object.mesh_data.positions.as_slice(),
+                        object.mesh_data.normals.as_slice(),
+                        object.mesh_data.indices.as_slice(),
+                    )
+                }
+            })
+            .collect();
+        crate::render::picking::nearest_surface(&ray, &placed)
     }
 
     /// Makes `index` the object the tools act on. False, changing

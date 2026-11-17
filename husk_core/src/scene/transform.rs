@@ -120,6 +120,18 @@ pub fn clamp_scale(scale: Vec3) -> Vec3 {
     Vec3::new(fix(scale.x), fix(scale.y), fix(scale.z))
 }
 
+/// The rotation that turns an object's own +Y axis, as `rotation` has it now,
+/// onto `target` by the shortest turn, keeping as much of its existing spin as
+/// possible. A zero `target` changes nothing.
+pub fn align_up_to(rotation: Quat, target: Vec3) -> Quat {
+    let target = target.normalize_or_zero();
+    if target == Vec3::ZERO {
+        return rotation;
+    }
+    let up = rotation * Vec3::Y;
+    (Quat::from_rotation_arc(up, target) * rotation).normalize()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +275,17 @@ assert!((a - b).length() < 1e-4, "{a:?} is not close to {b:?}");
             clamp_scale(Vec3::new(-3.0, 0.5, 0.001)),
             Vec3::new(-3.0, 0.5, 0.001),
         );
+    }
+
+    #[test]
+    fn align_up_to_turns_the_objects_up_axis_onto_the_target() {
+        assert_close(align_up_to(Quat::IDENTITY, Vec3::X) * Vec3::Y, Vec3::X);
+        // Already facing the target: the spin is kept.
+        let spun = Quat::from_rotation_y(0.7);
+        assert_close(align_up_to(spun, Vec3::Y) * Vec3::Z, spun * Vec3::Z);
+        // The opposite way works, and a zero target changes nothing.
+        assert_close(align_up_to(Quat::IDENTITY, -Vec3::Y) * Vec3::Y, -Vec3::Y);
+        assert_eq!(align_up_to(spun, Vec3::ZERO), spun);
     }
 
     #[test]

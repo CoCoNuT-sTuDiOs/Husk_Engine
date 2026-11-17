@@ -55,6 +55,7 @@ flutter:
 
   assets:
     - assets/images/husk_logo.png
+    - assets/images/
 
   fonts:
     - family: SpaceGrotesk

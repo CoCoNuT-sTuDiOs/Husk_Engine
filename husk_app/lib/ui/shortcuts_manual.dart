@@ -30,13 +30,17 @@ class ShortcutSection {
 /// THE MANUAL. Add new shortcuts here.
 const List<ShortcutSection> shortcutSections = [
   ShortcutSection('File', [
-    ShortcutEntry('Ctrl+S', 'Save the project'),
-    ShortcutEntry('Ctrl+O', 'Load a project'),
+    ShortcutEntry('Ctrl+S', 'Save the project (asks where the first time)'),
+    ShortcutEntry('Ctrl+Shift+S', 'Save the project under a new name'),
+    ShortcutEntry('Ctrl+O', 'Open a project'),
   ]),
   ShortcutSection('Edit', [
     ShortcutEntry('Ctrl+Z', 'Undo the last change to the scene'),
     ShortcutEntry('Ctrl+Shift+Z', 'Redo what you undid'),
     ShortcutEntry('Delete', 'Delete the active object'),
+    ShortcutEntry('Shift+D', 'Duplicate the active object beside itself'),
+    ShortcutEntry('Ctrl+C', 'Copy the active object'),
+    ShortcutEntry('Ctrl+V', 'Paste the copied object'),
   ]),
   ShortcutSection('Move around the view', [
     ShortcutEntry('Middle drag', 'Orbit the view'),
@@ -72,6 +76,8 @@ const List<ShortcutSection> shortcutSections = [
       'Maximize the viewport, or bring the panels back',
     ),
     ShortcutEntry('Ctrl+/', 'Open this manual'),
+    ShortcutEntry('T', 'Hide or show the tool strip on the left'),
+    ShortcutEntry('N', 'Hide or show the side panel on the right'),
   ]),
   ShortcutSection('Tools', [
     ShortcutEntry('G', 'Switch to the Move object tool'),

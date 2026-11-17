@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`, `push_scene_models`, `rebuild_renderer_from_scene`, `share_mesh_with_scene`
+// These functions are ignored because they are not marked as `pub`: `push_scene_camera`, `push_scene_lights`, `push_scene_models`, `rebuild_renderer_from_scene`, `save_thumbnail_if_managed`, `share_mesh_with_scene`
 
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
@@ -143,18 +143,6 @@ bool setTravelSpeed({required double speed}) =>
 /// The Travel slider's current value (units per second).
 double travelSpeed() => RustLib.instance.api.crateApiSimpleTravelSpeed();
 
-/// Saves the skeleton, skin weights and animation to `path` as a JSON
-/// file. Returns (true, summary) on success or (false, reason) on failure.
-(bool, String) saveProject({required String path}) =>
-    RustLib.instance.api.crateApiSimpleSaveProject(path: path);
-
-/// Loads a project saved with `save_project` onto the model that is
-/// currently open, replacing the skeleton, skin weights and animation.
-/// The project must have been saved for a model with the same number of
-/// vertices. Returns (true, summary) or (false, reason).
-(bool, String) loadProject({required String path}) =>
-    RustLib.instance.api.crateApiSimpleLoadProject(path: path);
-
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.
@@ -208,7 +196,13 @@ BigInt? addShape({
   required String name,
   required double x,
   required double y,
-}) => RustLib.instance.api.crateApiSimpleAddShape(name: name, x: x, y: y);
+  required bool snap,
+}) => RustLib.instance.api.crateApiSimpleAddShape(
+  name: name,
+  x: x,
+  y: y,
+  snap: snap,
+);
 
 /// Makes the object under screen pixel (x, y) the active one, so the
 /// bone and animation tools act on it. Returns its index, or None when
@@ -447,6 +441,94 @@ void refreshModels() => RustLib.instance.api.crateApiSimpleRefreshModels();
 (bool, String) importGlb({required String path}) =>
     RustLib.instance.api.crateApiSimpleImportGlb(path: path);
 
+/// The nearest surface under screen pixel (x, y), or None over empty space.
+/// With `skip_active` the active object and everything parented below it are
+/// left out, so an object being dragged does not land on itself.
+SurfaceSpot? surfaceUnderCursor({
+  required double x,
+  required double y,
+  required bool skipActive,
+}) => RustLib.instance.api.crateApiSimpleSurfaceUnderCursor(
+  x: x,
+  y: y,
+  skipActive: skipActive,
+);
+
+/// Puts the active object on the surface under screen pixel (x, y): its
+/// origin goes to the point the cursor meets, and its +Y axis turns to the
+/// way the surface faces, keeping as much of its spin as possible. The active
+/// object and its children are ignored, so it cannot land on itself. False,
+/// changing nothing, over empty space or when the active object is locked.
+bool snapActiveToSurface({required double x, required double y}) =>
+    RustLib.instance.api.crateApiSimpleSnapActiveToSurface(x: x, y: y);
+
+/// The projects in Husk's own folder, newest first.
+List<ProjectCard> homeProjects() =>
+    RustLib.instance.api.crateApiSimpleHomeProjects();
+
+/// How many projects Husk keeps in its own folder at once.
+BigInt homeProjectLimit() =>
+    RustLib.instance.api.crateApiSimpleHomeProjectLimit();
+
+/// A path in Husk's own folder for a new project, or None when the folder is
+/// already full.
+String? homeNewProjectPath() =>
+    RustLib.instance.api.crateApiSimpleHomeNewProjectPath();
+
+/// Deletes a project (and its picture) from Husk's own folder. Returns
+/// (true, message) or (false, reason).
+(bool, String) homeDeleteProject({required String path}) =>
+    RustLib.instance.api.crateApiSimpleHomeDeleteProject(path: path);
+
+/// Whether the scene has changes that are not in a saved project file.
+bool hasUnsavedChanges() =>
+    RustLib.instance.api.crateApiSimpleHasUnsavedChanges();
+
+/// Marks the scene as having unsaved changes (for recovered work).
+void markSceneUnsaved() =>
+    RustLib.instance.api.crateApiSimpleMarkSceneUnsaved();
+
+/// Starts a fresh, empty scene, as at start-up.
+void newScene() => RustLib.instance.api.crateApiSimpleNewScene();
+
+/// Writes a recovery copy of the scene if it changed since the last one. It is
+/// called every couple of minutes. Returns whether it wrote one.
+bool autosaveIfChanged() =>
+    RustLib.instance.api.crateApiSimpleAutosaveIfChanged();
+
+/// The recovery copy an earlier session left, if there is one.
+RecoveryInfo? recoveryInfo() =>
+    RustLib.instance.api.crateApiSimpleRecoveryInfo();
+
+/// Deletes the recovery copy.
+void discardRecovery() => RustLib.instance.api.crateApiSimpleDiscardRecovery();
+
+/// Saves the whole scene (every object, the world and the output settings) to
+/// `path` as a Husk project file. Returns (true, summary) or (false, reason).
+(bool, String) saveScene({required String path}) =>
+    RustLib.instance.api.crateApiSimpleSaveScene(path: path);
+
+/// Opens a Husk project file, replacing the whole scene, and looks at it.
+/// Returns (true, summary) or (false, reason); on false nothing changed.
+(bool, String) loadScene({required String path}) =>
+    RustLib.instance.api.crateApiSimpleLoadScene(path: path);
+
+/// Duplicates the active object beside itself and makes the copy the active
+/// one. A copy keeps its original's parent, so a copy of an eye stays on the
+/// same head. Returns the copy's index, or None when the active object has
+/// nothing to copy.
+BigInt? duplicateActiveObject() =>
+    RustLib.instance.api.crateApiSimpleDuplicateActiveObject();
+
+/// Copies the active object to the clipboard (Ctrl+C). False, changing
+/// nothing, when it has nothing to copy.
+bool copyActiveObject() =>
+    RustLib.instance.api.crateApiSimpleCopyActiveObject();
+
+/// Pastes the clipboard as a new object (Ctrl+V) and makes it the active
+/// one. Returns its index, or None when nothing was copied.
+BigInt? pasteObject() => RustLib.instance.api.crateApiSimplePasteObject();
+
 /// Goes back to the state before the last change to the scene. False,
 /// changing nothing, when there is nothing to undo.
 bool undoEdit() => RustLib.instance.api.crateApiSimpleUndoEdit();
@@ -583,6 +665,99 @@ class ObjectTransform {
           position == other.position &&
           rotationDegrees == other.rotationDegrees &&
           scale == other.scale;
+}
+
+/// One project in Husk's own folder, as the Home screen shows it: its name,
+/// where it is, how long ago it changed, its size and a small picture of how
+/// it looked when it was saved (raw RGBA pixels, empty when there is none).
+class ProjectCard {
+  final String name;
+  final String path;
+  final BigInt secondsAgo;
+  final BigInt bytes;
+  final int thumbWidth;
+  final int thumbHeight;
+  final Uint8List thumbRgba;
+
+  const ProjectCard({
+    required this.name,
+    required this.path,
+    required this.secondsAgo,
+    required this.bytes,
+    required this.thumbWidth,
+    required this.thumbHeight,
+    required this.thumbRgba,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      path.hashCode ^
+      secondsAgo.hashCode ^
+      bytes.hashCode ^
+      thumbWidth.hashCode ^
+      thumbHeight.hashCode ^
+      thumbRgba.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProjectCard &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          path == other.path &&
+          secondsAgo == other.secondsAgo &&
+          bytes == other.bytes &&
+          thumbWidth == other.thumbWidth &&
+          thumbHeight == other.thumbHeight &&
+          thumbRgba == other.thumbRgba;
+}
+
+/// A recovery copy left by an earlier session: where it is and how many
+/// seconds old it is.
+class RecoveryInfo {
+  final String path;
+  final BigInt secondsAgo;
+
+  const RecoveryInfo({required this.path, required this.secondsAgo});
+
+  @override
+  int get hashCode => path.hashCode ^ secondsAgo.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RecoveryInfo &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          secondsAgo == other.secondsAgo;
+}
+
+/// A surface under the cursor, as the viewport reads it: which object it
+/// belongs to, the point and which way the surface faces there (both in the
+/// scene).
+class SurfaceSpot {
+  final BigInt object;
+  final (double, double, double) position;
+  final (double, double, double) normal;
+
+  const SurfaceSpot({
+    required this.object,
+    required this.position,
+    required this.normal,
+  });
+
+  @override
+  int get hashCode => object.hashCode ^ position.hashCode ^ normal.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SurfaceSpot &&
+          runtimeType == other.runtimeType &&
+          object == other.object &&
+          position == other.position &&
+          normal == other.normal;
 }
 
 /// The scene's world as the Properties panel shows it: the background

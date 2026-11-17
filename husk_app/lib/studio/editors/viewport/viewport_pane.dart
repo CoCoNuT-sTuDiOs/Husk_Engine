@@ -17,8 +17,7 @@ import 'package:husk_app/studio/state/viewport_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
 
-// The renderer never draws more than this many pixels on its long side.
-const double _maxRenderSide = 1920;
+
 
 /// The viewport: a tool strip on top and the live render filling the rest.
 /// The engine renders at the panel's size, so nothing is stretched.
@@ -55,7 +54,11 @@ class _ViewportPaneState extends State<ViewportPane> {
   BigInt? _draggedJoint;
   bool _dragMovesCharacter = false;
 
-  int? _gizmoAxis;
+
+int? _gizmoAxis;
+
+  // Whether the drag in progress slides the active object over surfaces.
+  bool _surfaceDrag = false;
   (double, double, double) _gizmoStart = (0, 0, 0);
   double _gizmoStartParam = 0;
 
@@ -112,11 +115,12 @@ class _ViewportPaneState extends State<ViewportPane> {
   }
 
   void _requestSize(Size paneSize, double pixelRatio) {
-    var width = paneSize.width * pixelRatio;
-    var height = paneSize.height * pixelRatio;
+    final quality = _studio.quality;
+    var width = paneSize.width * pixelRatio * quality.renderScale;
+    var height = paneSize.height * pixelRatio * quality.renderScale;
     final longest = math.max(width, height);
-    if (longest > _maxRenderSide) {
-      final shrink = _maxRenderSide / longest;
+    if (longest > quality.maxSide) {
+      final shrink = quality.maxSide / longest;
       width *= shrink;
       height *= shrink;
     }
@@ -227,7 +231,8 @@ class _ViewportPaneState extends State<ViewportPane> {
       case StudioTool.moveObject:
         // A drag that starts on an arrow moves the object; anywhere else
         // it orbits the camera.
-        _beginGizmoDrag(details.localPosition, scale);
+     _beginGizmoDrag(details.localPosition, scale);
+        if (_gizmoAxis == null) _beginSurfaceDrag(details.localPosition, scale);
       case StudioTool.rotateObject:
         // Likewise for a ring: on it, the object turns; elsewhere, orbit.
         _beginRingDrag(details.localPosition, scale);
@@ -240,6 +245,10 @@ class _ViewportPaneState extends State<ViewportPane> {
   void _handlePanUpdate(DragUpdateDetails details, double scale) {
     final x = details.localPosition.dx / scale;
     final y = details.localPosition.dy / scale;
+    if (_surfaceDrag) {
+      _updateSurfaceDrag(details.localPosition, scale);
+      return;
+    }
     if (_gizmoAxis != null) {
       _updateGizmoDrag(x, y);
       return;
@@ -262,8 +271,21 @@ class _ViewportPaneState extends State<ViewportPane> {
     _viewport.dragJoint(joint, x, y, ik: _studio.ikMode);
   }
 
-  /// Starts a drag on a gizmo arrow if the pointer is on one; otherwise
-  /// the drag orbits the camera as usual.
+/// With Snap on, a drag that starts on the active object (not on an arrow)
+  /// slides it over the surfaces under the cursor instead of orbiting.
+  void _beginSurfaceDrag(Offset pointer, double scale) {
+    if (!_studio.snapToSurface || _studio.activeLocked) return;
+    final hit = _viewport.surfaceAt(pointer, scale, skipActive: false);
+    if (hit == null || hit.object != _studio.objectList.$2) return;
+    _surfaceDrag = true;
+  }
+
+  void _updateSurfaceDrag(Offset pointer, double scale) {
+// Over empty space the object stays where it last was.
+    _studio.snapActiveToSurface(pointer.dx / scale, pointer.dy / scale);
+  }
+
+  /// Starts a drag on a gizmo arrow if the pointer is on one; otherwise  /// the drag orbits the camera as usual.
   void _beginGizmoDrag(Offset pointer, double scale) {
     // A locked object has no handles, so the drag orbits instead.
     if (_studio.activeLocked) return;
@@ -422,7 +444,8 @@ class _ViewportPaneState extends State<ViewportPane> {
     ));
   }
 
-  void _endDrag() {
+void _endDrag() {
+    _surfaceDrag = false;
     _draggedJoint = null;
     _gizmoAxis = null;
     _gizmoHighlight.value = null;

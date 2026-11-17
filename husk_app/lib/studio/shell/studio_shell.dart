@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:husk_app/studio/editors/shapes/shapes_tray.dart';
@@ -10,6 +12,8 @@ import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/studio/state/timeline_controller.dart';
 import 'package:husk_app/studio/state/viewport_controller.dart';
+import 'package:husk_app/home/about_husk.dart';
+import 'package:husk_app/home/home_screen.dart';
 import 'package:husk_app/ui/typing.dart';
 import 'package:husk_app/studio/state/keymap.dart';
 
@@ -28,16 +32,33 @@ class _StudioShellState extends State<StudioShell> {
     studio: _studio,
     timeline: _timeline,
     viewport: _viewport,
+    showHomeScreen: () => setState(() => _showHome = true),
+    showStudioScreen: () => setState(() => _showHome = false),
   );
 
   // Keeps the viewport's state (texture, size) when it moves between the
   // normal layout and the maximized one.
-  final GlobalKey _viewportKey = GlobalKey();
+    final GlobalKey _viewportKey = GlobalKey();
+
+  // Whether the Home screen covers the studio. Husk opens on Home, and the
+  // studio stays alive underneath so nothing is lost when you go back.
+  bool _showHome = true;
+
+  // Writes a recovery copy of the scene every couple of minutes when it has
+  // changed.
+  Timer? _autosaveTimer;
 
   @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKey);
+    _autosaveTimer = Timer.periodic(
+      const Duration(minutes: 2),
+      (_) => _studio.autosave(),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _actions.offerRecovery(context);
+    });
     _lastActiveObject = _studio.objectList.$2;
     _studio.addListener(_onStudioChanged);
   }
@@ -45,6 +66,7 @@ class _StudioShellState extends State<StudioShell> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
+    _autosaveTimer?.cancel();
     _studio.removeListener(_onStudioChanged);
     _studio.dispose();
     _timeline.dispose();
@@ -68,11 +90,11 @@ class _StudioShellState extends State<StudioShell> {
   bool _handleKey(KeyEvent event) {
     // While the shortcuts manual is open it has the keys: Delete, Space and
     // the number keys must not act on the scene behind it.
-    if (_actions.shortcutsOpen) return false;
+  if (_showHome || _actions.shortcutsOpen) return false;
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
     final binding = bindingForKey(
       event.logicalKey,
-    ctrl: HardwareKeyboard.instance.isControlPressed,
+      ctrl: HardwareKeyboard.instance.isControlPressed,
       shift: HardwareKeyboard.instance.isShiftPressed,
       isRepeat: event is KeyRepeatEvent,
     );
@@ -82,11 +104,27 @@ class _StudioShellState extends State<StudioShell> {
     if (isTyping() && !binding.whileTyping) return false;
     _actions.runCommand(context, binding.command);
     return true;
-
   }
 
   @override
-  Widget build(BuildContext context) {
+Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Offstage(offstage: _showHome, child: _buildStudio(context)),
+        if (_showHome)
+          HomeScreen(
+            onNewProject: (path) => _actions.startNewProject(context, path),
+            onOpenProject: (path) => _actions.openProjectAt(context, path),
+            onOpenFile: () => _actions.load(context),
+            onShowShortcuts: () => _actions.showShortcuts(context),
+            onShowAbout: () => showAboutHusk(context),
+            onBackToScene: () => setState(() => _showHome = false),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStudio(BuildContext context) {
     return Scaffold(
       body: Column(
         children: [
@@ -108,10 +146,10 @@ class _StudioShellState extends State<StudioShell> {
                     Expanded(
                       child: Column(
                         children: [
-
                           Expanded(child: viewport),
-                           ShapesTray(studio: _studio),
-                          TimelinePane(actions: _actions),                        ],
+                          ShapesTray(studio: _studio),
+                          TimelinePane(actions: _actions),
+                        ],
                       ),
                     ),
                     SidePanel(actions: _actions),

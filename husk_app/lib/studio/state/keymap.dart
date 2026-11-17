@@ -7,8 +7,12 @@ import 'package:flutter/services.dart';
 /// change its line in the manual in the same edit.
 enum HuskCommand {
   save,
+  saveAs,
   load,
   deleteObject,
+  duplicate,
+  copy,
+  paste,
   undo,
   redo,
   zoomIn,
@@ -28,6 +32,8 @@ enum HuskCommand {
   toolMoveObject,
   toolRotateObject,
   toolScaleObject,
+  toggleToolPanel,
+  toggleSidePanel,
 }
 
 /// One row of the key table.
@@ -69,6 +75,13 @@ const List<KeyBinding> keyBindings = [
     whileTyping: true,
   ),
   KeyBinding(
+    HuskCommand.saveAs,
+    [LogicalKeyboardKey.keyS],
+    ctrl: true,
+    shift: true,
+    whileTyping: true,
+  ),
+  KeyBinding(
     HuskCommand.load,
     [LogicalKeyboardKey.keyO],
     ctrl: true,
@@ -87,7 +100,10 @@ const List<KeyBinding> keyBindings = [
     shift: true,
     repeats: true,
   ),
-  KeyBinding(HuskCommand.deleteObject, [LogicalKeyboardKey.delete]),
+KeyBinding(HuskCommand.deleteObject, [LogicalKeyboardKey.delete]),
+  KeyBinding(HuskCommand.duplicate, [LogicalKeyboardKey.keyD], shift: true),
+  KeyBinding(HuskCommand.copy, [LogicalKeyboardKey.keyC], ctrl: true),
+  KeyBinding(HuskCommand.paste, [LogicalKeyboardKey.keyV], ctrl: true),
   KeyBinding(HuskCommand.zoomOut, [
     LogicalKeyboardKey.minus,
     LogicalKeyboardKey.numpadSubtract,
@@ -134,6 +150,8 @@ const List<KeyBinding> keyBindings = [
   KeyBinding(HuskCommand.toolMoveObject, [LogicalKeyboardKey.keyG]),
   KeyBinding(HuskCommand.toolRotateObject, [LogicalKeyboardKey.keyR]),
   KeyBinding(HuskCommand.toolScaleObject, [LogicalKeyboardKey.keyS]),
+  KeyBinding(HuskCommand.toggleToolPanel, [LogicalKeyboardKey.keyT]),
+  KeyBinding(HuskCommand.toggleSidePanel, [LogicalKeyboardKey.keyN]),
   KeyBinding(
     HuskCommand.toggleMaximize,
     [LogicalKeyboardKey.space],

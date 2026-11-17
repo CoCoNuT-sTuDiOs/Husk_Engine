@@ -35,7 +35,10 @@ class OutlinerPanel extends StatelessWidget {
               depth: depth,
               onTap: () => studio.selectObject(index),
               locked: isLocked,
-              onToggleLock: () => actions.setLocked(context, index, !isLocked),
+            onToggleLock: () => actions.setLocked(context, index, !isLocked),
+              onDuplicate: index == 0
+                  ? null
+                  : () => actions.duplicateObjectAt(context, index),
               onDelete: index == 0
                   ? null
                   : () => actions.deleteObjectAt(context, index),
@@ -124,6 +127,7 @@ class _ObjectRow extends StatelessWidget {
     required this.active,
     required this.onTap,
     required this.onDelete,
+    required this.onDuplicate,
     required this.depth,
     required this.menuItems,
     required this.locked,
@@ -134,8 +138,10 @@ class _ObjectRow extends StatelessWidget {
   final String name;
   final bool active;
   final VoidCallback onTap;
-  final VoidCallback? onDelete;
+final VoidCallback? onDelete;
 
+  /// Makes a copy of the object beside it (null for the loaded model).
+  final VoidCallback? onDuplicate;
   /// Whether the object is locked (cannot be clicked in the viewport,
   /// moved or deleted).
   final bool locked;
@@ -200,6 +206,21 @@ class _ObjectRow extends StatelessWidget {
               itemBuilder: (_) => menuItems,
               onSelected: onMenu,
             ),
+            if (onDuplicate != null)
+              IconButton(
+                tooltip: 'Duplicate',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                icon: PhosphorIcon(
+                  PhosphorIconsRegular.copy,
+                  size: 14,
+                  color: HuskColors.textSecondary,
+                ),
+                onPressed: onDuplicate,
+              ),
             if (onDelete != null)
               IconButton(
                 tooltip: 'Delete',

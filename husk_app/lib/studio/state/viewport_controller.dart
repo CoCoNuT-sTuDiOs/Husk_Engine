@@ -21,6 +21,16 @@ class GizmoRing {
   final List<Offset> points;
 }
 
+/// A surface under the cursor: which object it belongs to, the point and
+/// which way the surface faces there (both in the scene).
+class SurfaceSpot {
+  const SurfaceSpot(this.object, this.position, this.normal);
+
+  final int object;
+  final (double, double, double) position;
+  final (double, double, double) normal;
+}
+
 class ViewportController {
   static const MethodChannel _channel = MethodChannel('husk/texture');
 
@@ -195,6 +205,23 @@ class ViewportController {
         x: x,
         y: y,
       );
+
+/// The nearest surface under [pointer] (panel pixels), or null over empty
+  /// space. [scale] converts render pixels to panel pixels. With
+  /// [skipActive] the active object and its children are left out.
+  SurfaceSpot? surfaceAt(
+    Offset pointer,
+    double scale, {
+    required bool skipActive,
+  }) {
+    final hit = rust.surfaceUnderCursor(
+      x: pointer.dx / scale,
+      y: pointer.dy / scale,
+      skipActive: skipActive,
+    );
+    if (hit == null) return null;
+    return SurfaceSpot(hit.object.toInt(), hit.position, hit.normal);
+  }
 
   /// The centre handle of the scale gizmo, after the three axis handles.
   static const int uniformScaleHandle = 3;

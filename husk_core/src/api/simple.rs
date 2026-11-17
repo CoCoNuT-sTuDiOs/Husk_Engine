@@ -443,89 +443,6 @@ pub fn travel_speed() -> f32 {
     crate::scene::active_object().timeline.travel_speed
 }
 
-/// Saves the skeleton, skin weights and animation to `path` as a JSON
-/// file. Returns (true, summary) on success or (false, reason) on failure.
-#[flutter_rust_bridge::frb(sync)]
-pub fn save_project(path: String) -> (bool, String) {
-    let vertex_count =
-        crate::platform::ffi::with_active_renderer(|renderer| renderer.mesh_positions().len()).unwrap_or(0);
-    let active = crate::scene::active_object();
-    let skeleton = &active.skeleton;
-    let weights = &active.weights;
-    let timeline = &active.timeline;    
-    match crate::project::write_project(
-        &path,
-        vertex_count,
-        &skeleton,
-        weights.as_deref(),
-        &timeline,
-    ) {
-        Ok(()) => (
-            true,
-            format!(
-                "Saved {} bones, {} keys and the skin weights to {path}",
-                skeleton.bones.len(),
-                timeline.keys.len()
-            ),
-        ),
-        Err(reason) => (false, reason),
-    }
-}
-
-/// Loads a project saved with `save_project` onto the model that is
-/// currently open, replacing the skeleton, skin weights and animation.
-/// The project must have been saved for a model with the same number of
-/// vertices. Returns (true, summary) or (false, reason).
-#[flutter_rust_bridge::frb(sync)]
-pub fn load_project(path: String) -> (bool, String) {
-    let project = match crate::project::read_project(&path) {
-        Ok(project) => project,
-        Err(reason) => return (false, reason),
-    };
-    let vertex_count =
-        crate::platform::ffi::with_active_renderer(|renderer| renderer.mesh_positions().len()).unwrap_or(0);
-    if project.vertex_count != vertex_count {
-        return (
-            false,
-            format!(
-                "This project was saved for a model with {} vertices, but the open model has {vertex_count}",
-                project.vertex_count
-            ),
-        );
-    }
-
-crate::scene::push_undo(None);
-    // Skin weights go to the GPU; a project saved without any gets the
-    // plain default (everything on bone 0).
-    let gpu_weights: Vec<crate::rig::skinning::VertexWeights> = match &project.weights {
-        Some(weights) => weights.clone(),
-        None => vec![
-            crate::rig::skinning::VertexWeights {
-                joint_indices: [0; 4],
-                weights: [1.0, 0.0, 0.0, 0.0],
-            };
-            vertex_count
-        ],
-    };
-    crate::platform::ffi::with_active_renderer(|renderer| renderer.update_vertex_weights(&gpu_weights));
-
-    let summary = format!(
-        "Loaded {} bones and {} keys from {path}",
-        project.skeleton.bones.len(),
-        project.timeline.keys.len()
-    );
-    {
-        let mut active = crate::scene::active_object();
-        let crate::scene::Object { skeleton, pose, weights, timeline, .. } = &mut *active;
-        *pose = crate::animation::pose::Pose::rest_for(&project.skeleton);
-        *skeleton = project.skeleton;
-        *weights = project.weights;
-        *timeline = project.timeline;
-    }
-    crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&[]));
-    (true, summary)
-}
-
 /// Screen-space (pixel) position of every joint in its current posed
 /// state, indexed the same as the skeleton's bones. An entry is None if
 /// that joint is behind the camera.
@@ -667,10 +584,10 @@ pub fn set_vertex_weight(vertex_index: usize, bone_index: usize) -> bool {
 
 
 #[flutter_rust_bridge::frb(sync)]
-pub fn add_shape(name: String, x: f64, y: f64) -> Option<usize> {
+pub fn add_shape(name: String, x: f64, y: f64, snap: bool) -> Option<usize> {
     let mesh = crate::geometry::shapes::by_name(&name)?;
     let (render_index, model, colour) = crate::platform::ffi::with_active_renderer_mut(|renderer| {
-    renderer.add_shape_at_screen(mesh, x as f32, y as f32)
+    renderer.add_shape_at_screen(mesh, x as f32, y as f32, snap)
     })
     .flatten()?;
     let mut letters = name.chars();
@@ -1368,6 +1285,265 @@ fn share_mesh_with_scene(index: usize) {
     if let Some(mesh) = mesh {
         crate::scene::set_object_mesh(index, mesh);
     }
+}
+
+/// A surface under the cursor, as the viewport reads it: which object it
+/// belongs to, the point and which way the surface faces there (both in the
+/// scene).
+pub struct SurfaceSpot {
+    pub object: usize,
+    pub position: (f32, f32, f32),
+    pub normal: (f32, f32, f32),
+}
+
+/// The nearest surface under screen pixel (x, y), or None over empty space.
+/// With `skip_active` the active object and everything parented below it are
+/// left out, so an object being dragged does not land on itself.
+#[flutter_rust_bridge::frb(sync)]
+pub fn surface_under_cursor(x: f64, y: f64, skip_active: bool) -> Option<SurfaceSpot> {
+    let (_, active) = crate::scene::object_list();
+    let parents = crate::scene::object_parents();
+    let mut skip = vec![false; parents.len()];
+    if skip_active {
+        for index in 0..parents.len() {
+            let mut current = Some(index);
+            for _ in 0..=parents.len() {
+                match current {
+                    Some(i) if i == active => {
+                        skip[index] = true;
+                        break;
+                    }
+                    Some(i) => current = parents[i],
+                    None => break,
+                }
+            }
+        }
+    }
+    let hit = crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.surface_at(x as f32, y as f32, &skip)
+    })
+    .flatten()?;
+    Some(SurfaceSpot {
+        object: hit.object,
+        position: (hit.point.x, hit.point.y, hit.point.z),
+        normal: (hit.normal.x, hit.normal.y, hit.normal.z),
+    })
+}
+
+/// Puts the active object on the surface under screen pixel (x, y): its
+/// origin goes to the point the cursor meets, and its +Y axis turns to the
+/// way the surface faces, keeping as much of its spin as possible. The active
+/// object and its children are ignored, so it cannot land on itself. False,
+/// changing nothing, over empty space or when the active object is locked.
+#[flutter_rust_bridge::frb(sync)]
+pub fn snap_active_to_surface(x: f64, y: f64) -> bool {
+    let Some(spot) = surface_under_cursor(x, y, true) else {
+        return false;
+    };
+    let mut world = crate::scene::active_transform().1;
+    world.translation = glam::Vec3::new(spot.position.0, spot.position.1, spot.position.2);
+    world.rotation = crate::scene::transform::align_up_to(
+        world.rotation,
+        glam::Vec3::new(spot.normal.0, spot.normal.1, spot.normal.2),
+    );
+    let euler = world.euler_degrees();
+    set_active_object_transform(ObjectTransform {
+        position: (world.translation.x, world.translation.y, world.translation.z),
+        rotation_degrees: (euler.x, euler.y, euler.z),
+        scale: (world.scale.x, world.scale.y, world.scale.z),
+    })
+}
+
+
+/// One project in Husk's own folder, as the Home screen shows it: its name,
+/// where it is, how long ago it changed, its size and a small picture of how
+/// it looked when it was saved (raw RGBA pixels, empty when there is none).
+pub struct ProjectCard {
+    pub name: String,
+    pub path: String,
+    pub seconds_ago: u64,
+    pub bytes: u64,
+    pub thumb_width: u32,
+    pub thumb_height: u32,
+    pub thumb_rgba: Vec<u8>,
+}
+
+/// The projects in Husk's own folder, newest first.
+#[flutter_rust_bridge::frb(sync)]
+pub fn home_projects() -> Vec<ProjectCard> {
+    crate::project::library::list()
+        .into_iter()
+        .map(|entry| {
+            let (thumb_width, thumb_height, thumb_rgba) =
+                crate::project::library::read_thumbnail(std::path::Path::new(&entry.path))
+                    .unwrap_or((0, 0, Vec::new()));
+            ProjectCard {
+                name: entry.name,
+                path: entry.path,
+                seconds_ago: entry.seconds_ago,
+                bytes: entry.bytes,
+                thumb_width,
+                thumb_height,
+                thumb_rgba,
+            }
+        })
+        .collect()
+}
+
+/// How many projects Husk keeps in its own folder at once.
+#[flutter_rust_bridge::frb(sync)]
+pub fn home_project_limit() -> usize {
+    crate::project::library::MAX_PROJECTS
+}
+
+/// A path in Husk's own folder for a new project, or None when the folder is
+/// already full.
+#[flutter_rust_bridge::frb(sync)]
+pub fn home_new_project_path() -> Option<String> {
+    crate::project::library::new_path().map(|path| path.to_string_lossy().to_string())
+}
+
+/// Deletes a project (and its picture) from Husk's own folder. Returns
+/// (true, message) or (false, reason).
+#[flutter_rust_bridge::frb(sync)]
+pub fn home_delete_project(path: String) -> (bool, String) {
+    match crate::project::library::delete(&path) {
+        Ok(()) => (true, String::from("Project deleted")),
+        Err(reason) => (false, reason),
+    }
+}
+
+/// Whether the scene has changes that are not in a saved project file.
+#[flutter_rust_bridge::frb(sync)]
+pub fn has_unsaved_changes() -> bool {
+    crate::scene::has_unsaved_changes()
+}
+
+/// Marks the scene as having unsaved changes (for recovered work).
+#[flutter_rust_bridge::frb(sync)]
+pub fn mark_scene_unsaved() {
+    crate::scene::mark_unsaved();
+}
+
+/// Starts a fresh, empty scene, as at start-up.
+#[flutter_rust_bridge::frb(sync)]
+pub fn new_scene() {
+    crate::scene::reset_scene();
+    let world = crate::scene::world();
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_world(&world));
+    rebuild_renderer_from_scene();
+}
+
+/// Saves a picture of the viewport beside a project in Husk's own folder, for
+/// the Home screen's card. Projects saved anywhere else get none.
+fn save_thumbnail_if_managed(path: &str) {
+    if !crate::project::library::is_managed(path) {
+        return;
+    }
+    let thumbnail = crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.last_frame_rgba().and_then(|(width, height, pixels)| {
+            crate::project::library::shrink(pixels, width as usize, height as usize, 320)
+        })
+    })
+    .flatten();
+    if let Some((width, height, rgba)) = thumbnail {
+        crate::project::library::write_thumbnail(std::path::Path::new(path), width, height, &rgba);
+    }
+}
+
+/// Writes a recovery copy of the scene if it changed since the last one. It is
+/// called every couple of minutes. Returns whether it wrote one.
+#[flutter_rust_bridge::frb(sync)]
+pub fn autosave_if_changed() -> bool {
+    match crate::scene::autosave_if_changed() {
+        Ok(wrote) => wrote,
+        Err(reason) => {
+            eprintln!("Husk: the recovery copy could not be written: {reason}");
+            false
+        }
+    }
+}
+
+/// A recovery copy left by an earlier session: where it is and how many
+/// seconds old it is.
+pub struct RecoveryInfo {
+    pub path: String,
+    pub seconds_ago: u64,
+}
+
+/// The recovery copy an earlier session left, if there is one.
+#[flutter_rust_bridge::frb(sync)]
+pub fn recovery_info() -> Option<RecoveryInfo> {
+    crate::project::recovery::recovery_info()
+        .map(|(path, seconds_ago)| RecoveryInfo { path, seconds_ago })
+}
+
+/// Deletes the recovery copy.
+#[flutter_rust_bridge::frb(sync)]
+pub fn discard_recovery() {
+    crate::project::recovery::clear_recovery();
+}
+
+/// Saves the whole scene (every object, the world and the output settings) to
+/// `path` as a Husk project file. Returns (true, summary) or (false, reason).
+#[flutter_rust_bridge::frb(sync)]
+pub fn save_scene(path: String) -> (bool, String) {
+    match crate::scene::with_scene(|scene| {
+        crate::project::scene_file::write_scene(&path, scene)
+    }) {
+        Some(Ok(summary)) => {
+            crate::project::recovery::clear_recovery();
+            crate::scene::mark_saved();
+            save_thumbnail_if_managed(&path);
+            (true, summary)
+        }
+        Some(Err(reason)) => (false, reason),
+        None => (false, String::from("There is no scene to save")),
+    }
+}
+
+/// Opens a Husk project file, replacing the whole scene, and looks at it.
+/// Returns (true, summary) or (false, reason); on false nothing changed.
+#[flutter_rust_bridge::frb(sync)]
+pub fn load_scene(path: String) -> (bool, String) {
+    let scene = match crate::project::scene_file::read_scene(&path) {
+        Ok(scene) => scene,
+        Err(reason) => return (false, reason),
+    };
+    let summary = format!("Opened {} objects from {path}", scene.objects.len());
+    let world = scene.world;
+    crate::scene::replace_scene(scene);
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_world(&world));
+    rebuild_renderer_from_scene();
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.frame_all());
+    (true, summary)
+}
+
+/// Duplicates the active object beside itself and makes the copy the active
+/// one. A copy keeps its original's parent, so a copy of an eye stays on the
+/// same head. Returns the copy's index, or None when the active object has
+/// nothing to copy.
+#[flutter_rust_bridge::frb(sync)]
+pub fn duplicate_active_object() -> Option<usize> {
+    let index = crate::scene::duplicate_active()?;
+    rebuild_renderer_from_scene();
+    Some(index)
+}
+
+/// Copies the active object to the clipboard (Ctrl+C). False, changing
+/// nothing, when it has nothing to copy.
+#[flutter_rust_bridge::frb(sync)]
+pub fn copy_active_object() -> bool {
+    crate::scene::copy_active()
+}
+
+/// Pastes the clipboard as a new object (Ctrl+V) and makes it the active
+/// one. Returns its index, or None when nothing was copied.
+#[flutter_rust_bridge::frb(sync)]
+pub fn paste_object() -> Option<usize> {
+    let index = crate::scene::paste()?;
+    rebuild_renderer_from_scene();
+    Some(index)
 }
 
 /// Brings the renderer in step with the scene from scratch: every object is

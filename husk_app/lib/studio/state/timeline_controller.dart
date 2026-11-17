@@ -4,10 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:husk_app/src/rust/api/simple.dart' as rust;
 
 class TimelineController extends ChangeNotifier {
-  /// TEMPORARY: one fixed project file, like the old canvas. A file picker
-  /// arrives with Section 8.
-  static const String projectPath =
-      r'C:\Users\HomePC\Documents\husk_project.json';
 
   /// The timeline is a fixed 5 seconds for now (Section 11 makes it
   /// adjustable). All times are in seconds.
@@ -136,18 +132,4 @@ class TimelineController extends ChangeNotifier {
     notifyListeners();
   }
 
-  String save() => rust.saveProject(path: projectPath).$2;
-
-  String load() {
-    if (_playing) _stopPlayback();
-    final (ok, message) = rust.loadProject(path: projectPath);
-    if (ok) {
-      _refreshKeys();
-      _time = 0.0;
-      _travelSpeed = rust.travelSpeed();
-      rust.seekToTime(time: 0.0);
-    }
-    notifyListeners();
-    return message;
-  }
 }

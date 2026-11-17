@@ -15,8 +15,9 @@ class ToolColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+final collapsed = studio.toolsCollapsed && !floating;
     return Container(
-      width: 52,
+      width: collapsed ? 20 : 52,
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: floating
           ? BoxDecoration(
@@ -31,11 +32,45 @@ class ToolColumn extends StatelessWidget {
       child: ListenableBuilder(
         listenable: studio,
         builder: (context, _) {
+          if (studio.toolsCollapsed && !floating) {
+            return Align(
+              alignment: Alignment.topCenter,
+              child: IconButton(
+                tooltip: 'Show tool strip (T)',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 20,
+                  height: 28,
+                ),
+                icon: const Icon(
+                  Icons.chevron_right,
+                  size: 16,
+                  color: HuskColors.textSecondary,
+                ),
+                onPressed: studio.toggleToolsCollapsed,
+              ),
+            );
+          }
           return Column(
             // Floating, it is only as tall as its buttons; in the window's
             // left edge it fills the height as before.
             mainAxisSize: floating ? MainAxisSize.min : MainAxisSize.max,
             children: [
+              if (!floating)
+                IconButton(
+                  tooltip: 'Hide tool strip (T)',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 40,
+                    height: 24,
+                  ),
+                  icon: const Icon(
+                    Icons.chevron_left,
+                    size: 16,
+                    color: HuskColors.textSecondary,
+                  ),
+                  onPressed: studio.toggleToolsCollapsed,
+                ),
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.cursor),
                 tooltip: 'Select and pose',

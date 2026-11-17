@@ -16,21 +16,188 @@ class StudioActions {
     required this.studio,
     required this.timeline,
     required this.viewport,
+    this.showHomeScreen,
+    this.showStudioScreen,
   });
 
   final StudioController studio;
   final TimelineController timeline;
   final ViewportController viewport;
 
+  /// Shows the Home screen over the studio (the scene stays as it is).
+  final VoidCallback? showHomeScreen;
+
+  /// Hides the Home screen so the studio shows.
+  final VoidCallback? showStudioScreen;
   // File
 
-  void save(BuildContext context) => showMessage(context, timeline.save());
+/// Saves to the project's file, or asks where when it has none yet.
+  Future<void> save(BuildContext context) async {
+    final path = studio.projectPath;
+    if (path == null) return saveAs(context);
+    showMessage(context, studio.saveProject(path));
+  }
 
-  void load(BuildContext context) {
-    final message = timeline.load();
+  /// Always asks where to save.
+  Future<void> saveAs(BuildContext context) async {
+    final location = await getSaveLocation(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Husk projects', extensions: ['husk']),
+      ],
+      suggestedName: 'untitled.husk', 
+    );
+    if (location == null) return;
+    if (!context.mounted) return;
+    var path = location.path;
+    if (!path.toLowerCase().endsWith('.husk')) path = '$path.husk';
+    showMessage(context, studio.saveProject(path));
+  }
+
+Future<void> load(BuildContext context) async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Husk projects', extensions: ['husk']),
+      ],
+    );
+    if (file == null) return;
+    if (!context.mounted) return;
+    if (!await confirmDiscard(context)) return;
+    if (!context.mounted) return;
+    final message = studio.openProject(file.path);
+    timeline.refresh();
     studio.selectBone(null);
     studio.setTool(StudioTool.select);
+    if (studio.projectPath == file.path) showStudioScreen?.call();
     showMessage(context, message);
+  }
+
+/// At start-up, offers to recover the work an earlier session left behind
+  /// (after a crash, a power cut or closing without saving).
+  Future<void> offerRecovery(BuildContext context) async {
+    final info = studio.recoveryInfo;
+    if (info == null) return;
+    final recover = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Recover unsaved work?'),
+        content: Text(
+          'Husk found a recovery copy from ${_ago(info.secondsAgo.toInt())} '
+          'ago, left by a crash or by closing without saving.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Discard'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Recover'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted) return;
+    if (recover == true) {
+      showMessage(context, studio.recoverProject(info.path));
+      showStudioScreen?.call();
+      timeline.refresh();
+    } else {
+      studio.discardRecovery();
+    }
+  }
+
+  /// How long ago, in words: "moments", "5 minutes", "3 hours", "2 days".
+  String _ago(int seconds) {
+    if (seconds < 60) return 'moments';
+    final minutes = seconds ~/ 60;
+    if (minutes < 60) return '$minutes ${minutes == 1 ? 'minute' : 'minutes'}';
+    final hours = minutes ~/ 60;
+    if (hours < 24) return '$hours ${hours == 1 ? 'hour' : 'hours'}';
+    final days = hours ~/ 24;
+    return '$days ${days == 1 ? 'day' : 'days'}';
+  }
+
+/// Goes to the Home screen. The scene stays as it is.
+  void goHome() => showHomeScreen?.call();
+
+  /// Before the scene is replaced: if it has changes that are not in a saved
+  /// project, asks whether to save them. True when it is fine to go on.
+  Future<bool> confirmDiscard(BuildContext context) async {
+    if (!studio.hasUnsavedChanges) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Save your changes?'),
+        content: const Text(
+          'The scene has changes that are not in a saved project.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: const Text(
+              "Don't save",
+              style: TextStyle(color: HuskColors.error),
+            ),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'discard') {
+      // The work is being thrown away on purpose, so it is not offered back
+      // as a recovery copy at the next start.
+      studio.discardRecovery();
+      return true;
+    }
+    if (choice != 'save') return false;
+    if (!context.mounted) return false;
+    await save(context);
+    // Saving may have been cancelled in the file dialog.
+    return !studio.hasUnsavedChanges;
+  }
+
+  /// Starts an empty project that will be saved at [path] in Husk's folder.
+  Future<void> startNewProject(BuildContext context, String path) async {
+    if (!await confirmDiscard(context)) return;
+    studio.newProject(path);
+    timeline.refresh();
+    showStudioScreen?.call();
+  }
+
+  /// File > New project: starts an empty project in Husk's folder, or says
+  /// that both slots are used.
+  void newProjectFromMenu(BuildContext context) {
+    final path = studio.newProjectPath();
+    if (path == null) {
+      showMessage(
+        context,
+        'Both project slots are used. Open Home and delete a project to make room.',
+      );
+      return;
+    }
+    startNewProject(context, path);
+  }
+
+  /// Opens the project at [path] (from the Home screen).
+  Future<void> openProjectAt(BuildContext context, String path) async {
+    if (!await confirmDiscard(context)) return;
+    final message = studio.openProject(path);
+    if (studio.projectPath == path) {
+      timeline.refresh();
+      studio.selectBone(null);
+      studio.setTool(StudioTool.select);
+      showStudioScreen?.call();
+    }
+    if (context.mounted) showMessage(context, message);
   }
 
   /// Asks for a glTF or GLB file and imports it as a new object.
@@ -57,6 +224,19 @@ void undo(BuildContext context) {
     timeline.reloadKeys();
     if (message != null) showMessage(context, message);
   }
+void duplicate(BuildContext context) =>
+      showMessage(context, studio.duplicateActive());
+
+  /// Duplicates the object at [index], which becomes the active one.
+  void duplicateObjectAt(BuildContext context, int index) {
+    studio.selectObject(index);
+    duplicate(context);
+  }
+
+  void copy(BuildContext context) => showMessage(context, studio.copyActive());
+
+  void paste(BuildContext context) => showMessage(context, studio.paste());
+
   void toggleCameraView(BuildContext context) =>
       showMessage(context, studio.toggleCameraView());
 
@@ -128,8 +308,15 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
 
   // View
 
-  void toggleMaximize() => studio.toggleViewportMaximized();
+void toggleMaximize() => studio.toggleViewportMaximized();
 
+  void toggleToolPanel() => studio.toggleToolsCollapsed();
+
+void toggleSidePanel() => studio.toggleSidePanelCollapsed();
+
+  void setLowQuality() => studio.setQuality(ViewportQuality.low);
+
+  void setNormalQuality() => studio.setQuality(ViewportQuality.normal);
   // Help
 
   bool _shortcutsOpen = false;
@@ -195,12 +382,20 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
     switch (command) {
       case HuskCommand.save:
         save(context);
+      case HuskCommand.saveAs:
+        saveAs(context);
       case HuskCommand.load:
         load(context);
         case HuskCommand.undo:
         undo(context);
       case HuskCommand.redo:
         redo(context);
+      case HuskCommand.duplicate:
+        duplicate(context);
+      case HuskCommand.copy:
+        copy(context);
+      case HuskCommand.paste:
+        paste(context);
       case HuskCommand.deleteObject:
         deleteObject(context);
       case HuskCommand.zoomIn:
@@ -231,6 +426,10 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
         toggleMaximize();
           case HuskCommand.showShortcuts:
         showShortcuts(context);
+      case HuskCommand.toggleToolPanel:
+        toggleToolPanel();
+      case HuskCommand.toggleSidePanel:
+        toggleSidePanel();
       case HuskCommand.toolMoveObject:
         studio.setTool(StudioTool.moveObject);
       case HuskCommand.toolRotateObject:

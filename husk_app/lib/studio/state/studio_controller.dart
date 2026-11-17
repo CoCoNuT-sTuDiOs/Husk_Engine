@@ -15,6 +15,22 @@ enum StudioTool {
   scaleObject,
 }
 
+/// How much the viewport draws. Low renders at half resolution for slow
+/// laptops and Normal at full resolution. Shadows and subdivision levels join
+/// this setting when they exist.
+enum ViewportQuality {
+  low(renderScale: 0.5, maxSide: 1280),
+  normal(renderScale: 1.0, maxSide: 1920);
+
+  const ViewportQuality({required this.renderScale, required this.maxSide});
+
+  /// The share of the window's real pixels the viewport draws.
+  final double renderScale;
+
+  /// The most pixels the viewport draws along its longer side.
+  final double maxSide;
+}
+
 class StudioController extends ChangeNotifier {
   StudioController() {
     // A model that already has a rig is for posing; a bare one is for
@@ -28,8 +44,12 @@ class StudioController extends ChangeNotifier {
   bool _viewportMaximized = false;
   StudioTool _tool = StudioTool.select;
   bool _ikMode = false;
-
-BigInt? get selectedBone => _selectedBone;
+  bool _toolsCollapsed = false;
+  bool _sidePanelCollapsed = false;
+  bool _snapToSurface = false;
+ String? _projectPath;
+  ViewportQuality _quality = ViewportQuality.normal;
+ BigInt? get selectedBone => _selectedBone;
 
   /// How many bones the skeleton has.
   int get boneCount => rust.boneCount().toInt();
@@ -44,6 +64,52 @@ BigInt? get selectedBone => _selectedBone;
   /// True once skin weights have been computed or loaded.
   bool get hasWeights =>
       rust.getVertexDominantBone(vertexIndex: BigInt.zero) != null;
+/// Puts the active object on the surface under the cursor, turned to lie on
+  /// it. [x] and [y] are render pixels. False over empty space.
+  bool snapActiveToSurface(double x, double y) {
+    final applied = rust.snapActiveToSurface(x: x, y: y);
+    if (applied) notifyListeners();
+    return applied;
+  }
+
+  /// When on, shapes dropped from the tray and the active object dragged with
+  /// the Move object tool stick to the surface under the cursor.
+  bool get snapToSurface => _snapToSurface;
+
+  void toggleSnapToSurface() {
+    _snapToSurface = !_snapToSurface;
+    notifyListeners();
+  }
+
+/// How much the viewport draws (see [ViewportQuality]).
+  ViewportQuality get quality => _quality;
+
+  /// Whether the viewport is on the Low setting.
+  bool get lowQuality => _quality == ViewportQuality.low;
+
+  void setQuality(ViewportQuality quality) {
+    if (_quality == quality) return;
+    _quality = quality;
+    notifyListeners();
+  }
+
+  /// True while the left tool strip is folded away to a thin rail.
+  bool get toolsCollapsed => _toolsCollapsed;
+
+  /// True while the right Outliner and Properties panel is folded away to a
+  /// thin rail.
+  bool get sidePanelCollapsed => _sidePanelCollapsed;
+
+  void toggleToolsCollapsed() {
+    _toolsCollapsed = !_toolsCollapsed;
+    notifyListeners();
+  }
+
+  void toggleSidePanelCollapsed() {
+    _sidePanelCollapsed = !_sidePanelCollapsed;
+    notifyListeners();
+  }
+
   /// True while the viewport fills the window and the other panes are hidden.
   bool get viewportMaximized => _viewportMaximized;
 
@@ -94,7 +160,7 @@ BigInt? get selectedBone => _selectedBone;
 
 
   String? addShape(String name, double x, double y) {
-    final index = rust.addShape(name: name, x: x, y: y);
+  final index = rust.addShape(name: name, x: x, y: y, snap: _snapToSurface);
     if (index == null) return 'Could not add the $name here';
     notifyListeners();
     return null;
@@ -412,6 +478,111 @@ final (removed, parent) = rust.undoLastBone();
   /// now, and every panel reads the scene again.
   void _afterHistoryStep() {
     _selectedBone = null;
+    notifyListeners();
+  }
+
+/// Duplicates the active object beside itself and selects the copy.
+  /// Returns a message.
+  String duplicateActive() {
+    final index = rust.duplicateActiveObject();
+    if (index == null) return 'Nothing to duplicate: select a shape first';
+    _afterCopy();
+    return 'Duplicated as object $index';
+  }
+
+  /// Copies the active object to the clipboard. Returns a message.
+  String copyActive() => rust.copyActiveObject()
+      ? 'Copied'
+      : 'Nothing to copy: select a shape first';
+
+  /// Pastes the clipboard as a new object and selects it. Returns a message.
+  String paste() {
+    final index = rust.pasteObject();
+    if (index == null) return 'Nothing to paste: copy a shape first (Ctrl+C)';
+    _afterCopy();
+    return 'Pasted as object $index';
+  }
+
+  /// A new copy is the active object. A joint selected before means nothing
+  /// on it, and the Move object tool is ready to put it where it belongs.
+  void _afterCopy() {
+    _selectedBone = null;
+    if (_tool == StudioTool.select || _tool == StudioTool.placeBones) {
+      _tool = StudioTool.moveObject;
+    }
+    notifyListeners();
+  }
+
+/// The file the project was last opened from or saved to, or null for a new
+  /// project that has no file yet.
+  String? get projectPath => _projectPath;
+
+  /// The name the top bar shows: the project file's name, or Untitled project.
+  String get projectName {
+    final path = _projectPath;
+    if (path == null) return 'Untitled project';
+    return path.split(RegExp(r'[\\/]')).last;
+  }
+
+  /// Saves the whole scene to [path] and remembers it as the project's file.
+  /// Returns a message.
+  String saveProject(String path) {
+    final (saved, message) = rust.saveScene(path: path);
+    if (saved) {
+      _projectPath = path;
+      notifyListeners();
+    }
+    return message;
+  }
+
+  /// Opens the project file at [path], replacing the whole scene. Returns a
+  /// message.
+  String openProject(String path) {
+    final (opened, message) = rust.loadScene(path: path);
+    if (!opened) return message;
+    _projectPath = path;
+    _selectedBone = null;
+    leaveCameraView();
+    notifyListeners();
+    return message;
+  }
+
+/// Writes a recovery copy of the scene if it changed since the last one.
+  void autosave() => rust.autosaveIfChanged();
+
+  /// The recovery copy an earlier session left, or null.
+  rust.RecoveryInfo? get recoveryInfo => rust.recoveryInfo();
+
+  /// Opens the recovery copy at [path] as an untitled project, so saving asks
+  /// where to put it. The copy stays until the work is saved. Returns a
+  /// message.
+  String recoverProject(String path) {
+    final (opened, message) = rust.loadScene(path: path);
+    if (!opened) return message;
+    _projectPath = null;
+    rust.markSceneUnsaved();
+    _selectedBone = null;
+    leaveCameraView();
+    notifyListeners();
+    return 'Recovered your unsaved work. Save it with Ctrl+S.';
+  }
+
+  void discardRecovery() => rust.discardRecovery();
+
+/// Whether the scene has changes that are not in a saved project file.
+  bool get hasUnsavedChanges => rust.hasUnsavedChanges();
+
+  /// A path in Husk's own project folder for a new project, or null when both
+  /// project slots are used.
+  String? newProjectPath() => rust.homeNewProjectPath();
+
+  /// Starts a fresh, empty project that will be saved at [path].
+  void newProject(String path) {
+    rust.newScene();
+    _projectPath = path;
+    _selectedBone = null;
+    _tool = StudioTool.select;
+    leaveCameraView();
     notifyListeners();
   }
 

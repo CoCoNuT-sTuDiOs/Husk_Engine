@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:husk_app/home/about_husk.dart';
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:phosphor_icons/phosphor_icons.dart';
@@ -45,14 +46,28 @@ class StudioTopBar extends StatelessWidget {
                     SubmenuButton(
                       menuChildren: [
                         MenuItemButton(
+                          onPressed: actions.goHome,
+                          child: const Text('Home'),
+                        ),
+                        MenuItemButton(
+                          onPressed: () => actions.newProjectFromMenu(context),
+                          child: const Text('New project'),
+                        ),
+                        const Divider(height: 8),
+                        MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+S'),
                           onPressed: () => actions.save(context),
                           child: const Text('Save project'),
                         ),
                         MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+Shift+S'),
+                          onPressed: () => actions.saveAs(context),
+                          child: const Text('Save project as...'),
+                        ),
+                        MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+O'),
                           onPressed: () => actions.load(context),
-                        child: const Text('Load project'),
+                        child: const Text('Open project...'),
                         ),
                         MenuItemButton(
                           onPressed: () => actions.importModel(context),
@@ -77,7 +92,23 @@ class StudioTopBar extends StatelessWidget {
                          MenuItemButton(
                           trailingIcon: _shortcut('Delete'),
                           onPressed: () => actions.deleteObject(context),
-                          child: const Text('Delete object'),
+                        child: const Text('Delete object'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Shift+D'),
+                          onPressed: () => actions.duplicate(context),
+                          child: const Text('Duplicate'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+C'),
+                          onPressed: () => actions.copy(context),
+                          child: const Text('Copy'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('Ctrl+V'),
+                          onPressed: () => actions.paste(context),
+                          child: const Text('Paste'),
+
                         ),
                         MenuItemButton(
                           onPressed: actions.resetPose,
@@ -114,6 +145,24 @@ class StudioTopBar extends StatelessWidget {
                     ),
                     SubmenuButton(
                       menuChildren: [
+                        MenuItemButton(
+                          trailingIcon: _shortcut('T'),
+                          onPressed: actions.toggleToolPanel,
+                          child: Text(
+                            actions.studio.toolsCollapsed
+                                ? 'Show tool strip'
+                                : 'Hide tool strip',
+                          ),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('N'),
+                          onPressed: actions.toggleSidePanel,
+                          child: Text(
+                            actions.studio.sidePanelCollapsed
+                                ? 'Show side panel'
+                                : 'Hide side panel',
+                          ),
+                        ),
                         MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+Space'),
                           onPressed: actions.toggleMaximize,
@@ -175,6 +224,27 @@ class StudioTopBar extends StatelessWidget {
                         ),
                         const Divider(height: 8),
                         MenuItemButton(
+                          leadingIcon: SizedBox(
+                            width: 16,
+                            child: actions.studio.lowQuality
+                                ? const Icon(Icons.check, size: 16)
+                                : null,
+                          ),
+                          onPressed: actions.setLowQuality,
+                          child: const Text('Low quality'),
+                        ),
+                        MenuItemButton(
+                          leadingIcon: SizedBox(
+                            width: 16,
+                            child: actions.studio.lowQuality
+                                ? null
+                                : const Icon(Icons.check, size: 16),
+                          ),
+                          onPressed: actions.setNormalQuality,
+                          child: const Text('Normal quality'),
+                        ),
+                        const Divider(height: 8),
+                        MenuItemButton(
                           trailingIcon: _shortcut('5'),
                           onPressed: actions.toggleOrthographic,
                           child: Text(
@@ -188,6 +258,10 @@ class StudioTopBar extends StatelessWidget {
                     SubmenuButton(
                       menuChildren: [
                         MenuItemButton(
+                          onPressed: () => showAboutHusk(context),
+                          child: const Text('About Husk'),
+                        ),
+                        MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+/'),
                           onPressed: () => actions.showShortcuts(context),
                           child: const Text('Keyboard Shortcuts'),
@@ -200,9 +274,16 @@ class StudioTopBar extends StatelessWidget {
               },
             ),
           ),
-          const Text(
-            'Untitled project',
-            style: TextStyle(color: HuskColors.textSecondary, fontSize: 13),
+
+          ListenableBuilder(
+            listenable: actions.studio,
+            builder: (context, _) => Text(
+              actions.studio.projectName,
+              style: const TextStyle(
+                color: HuskColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
           ),
           const SizedBox(width: 16),
           // Disabled until Section 7 (export) exists.

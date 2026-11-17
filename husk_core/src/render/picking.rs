@@ -4,10 +4,6 @@ pub struct Ray {
 }
 
 impl Ray {
-    /// Builds a world-space ray from a screen-space click position, given
-    /// the viewport size and the camera's combined view-projection matrix.
-    /// Not covered by this step's test yet verified once wired to a real
-    /// camera and real screen coordinates.
     pub fn from_screen(
         screen_x: f32,
         screen_y: f32,
@@ -49,10 +45,6 @@ pub struct RayHit {
     pub distance: f32,
 }
 
-/// Finds the closest point where `ray` intersects any triangle in the
-/// mesh (given as raw positions + indices), using the Moller-Trumbore
-/// ray-triangle intersection algorithm — a standard, published algorithm,
-/// not proprietary engine logic.
 pub fn ray_mesh_intersection(
     ray: &Ray,
     positions: &[[f32; 3]],
@@ -149,12 +141,6 @@ pub fn project_to_screen(
     ))
 }
 
-/// Where along an axis line the ray passes closest to it: the t for which
-/// `axis_origin + axis_dir * t` (with `axis_dir` as a unit vector) is the
-/// point of the axis nearest the ray. Dragging a gizmo arrow uses the
-/// difference between two of these, so the object follows the cursor along
-/// the axis. None when the ray runs parallel to the axis (there is no
-/// single nearest point) or the axis has no direction.
 pub fn closest_param_on_axis(
     ray: &Ray,
     axis_origin: glam::Vec3,
@@ -306,6 +292,97 @@ pub fn axis_screen_ends(
 }
 
 
+
+/// A surface found under a ray: which placed mesh it belongs to, where the
+/// ray meets it and which way the surface faces there, all in the scene.
+pub struct SurfaceHit {
+    pub object: usize,
+    pub point: glam::Vec3,
+    pub normal: glam::Vec3,
+}
+
+/// The weights of the corners `a`, `b` and `c` of a triangle that give
+/// `point`, a point on its plane. The three add up to 1.
+fn barycentric(
+    point: glam::Vec3,
+    a: glam::Vec3,
+    b: glam::Vec3,
+    c: glam::Vec3,
+) -> (f32, f32, f32) {
+    let ab = b - a;
+    let ac = c - a;
+    let ap = point - a;
+    let d00 = ab.dot(ab);
+    let d01 = ab.dot(ac);
+    let d11 = ac.dot(ac);
+    let d20 = ap.dot(ab);
+    let d21 = ap.dot(ac);
+    let denominator = d00 * d11 - d01 * d01;
+    if denominator.abs() < 1e-12 {
+        return (1.0, 0.0, 0.0);
+    }
+    let v = (d11 * d20 - d01 * d21) / denominator;
+    let w = (d00 * d21 - d01 * d20) / denominator;
+    (1.0 - v - w, v, w)
+}
+
+/// The nearest surface under `ray` among several placed meshes, each given
+/// as its placement, its points, its normals and its triangle indices. A
+/// mesh with no triangles is skipped, so the ray goes through it. The normal
+/// is blended from the corners of the triangle that was hit, so a curved
+/// surface turns smoothly, and it always faces the ray's origin.
+pub fn nearest_surface(
+    ray: &Ray,
+    placed: &[(glam::Mat4, &[[f32; 3]], &[[f32; 3]], &[u32])],
+) -> Option<SurfaceHit> {
+    // Which mesh, which of its triangles, and how far along the ray.
+    let mut best: Option<(usize, usize, f32)> = None;
+    for (object, (model, positions, _, indices)) in placed.iter().enumerate() {
+        // Moving the ray into the mesh's own space keeps t the same along it,
+        // so hits on different meshes can be compared directly.
+        let local = ray.to_local(*model);
+        for (triangle, corners) in indices.chunks_exact(3).enumerate() {
+            let v0 = glam::Vec3::from(positions[corners[0] as usize]);
+            let v1 = glam::Vec3::from(positions[corners[1] as usize]);
+            let v2 = glam::Vec3::from(positions[corners[2] as usize]);
+            if let Some(t) = ray_triangle_intersection(&local, v0, v1, v2) {
+                if best.map_or(true, |(_, _, nearest)| t < nearest) {
+                    best = Some((object, triangle, t));
+                }
+            }
+        }
+    }
+    let (object, triangle, distance) = best?;
+    let (model, positions, normals, indices) = placed[object];
+    let corners = &indices[triangle * 3..triangle * 3 + 3];
+    let local = ray.to_local(model);
+    let v = [corners[0], corners[1], corners[2]]
+        .map(|index| glam::Vec3::from(positions[index as usize]));
+    let hit_local = local.origin + local.direction * distance;
+    let (wa, wb, wc) = barycentric(hit_local, v[0], v[1], v[2]);
+    let face = (v[1] - v[0]).cross(v[2] - v[0]);
+    let blended = if normals.len() == positions.len() {
+        let corner = |slot: usize| glam::Vec3::from(normals[corners[slot] as usize]);
+        corner(0) * wa + corner(1) * wb + corner(2) * wc
+    } else {
+        face
+    };
+    // Normals turn with the inverse transpose of the placement, so they stay
+    // at right angles to the surface under any scale.
+    let normal_matrix = glam::Mat3::from_mat4(model).inverse().transpose();
+    let mut normal = (normal_matrix * blended).normalize_or_zero();
+    if normal == glam::Vec3::ZERO {
+        normal = (normal_matrix * face).normalize_or_zero();
+    }
+    if normal.dot(ray.direction) > 0.0 {
+        normal = -normal;
+    }
+    Some(SurfaceHit {
+        object,
+        point: ray.origin + ray.direction * distance,
+        normal,
+    })
+}
 
 fn ray_triangle_intersection(ray: &Ray, v0: glam::Vec3, v1: glam::Vec3, v2: glam::Vec3) -> Option<f32> {
 const EPSILON: f32 = 1e-6;
@@ -674,8 +751,74 @@ mod tests {
     }
 
     #[test]
+fn nearest_surface_gives_the_point_and_the_way_the_surface_faces() {
+        let (positions, indices) = one_quad();
+        let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
+        let placed = [(
+            glam::Mat4::IDENTITY,
+            positions.as_slice(),
+            normals.as_slice(),
+            indices.as_slice(),
+        )];
+        let hit = nearest_surface(&ray_down_z(), &placed).unwrap();
+        assert_eq!(hit.object, 0);
+        assert!((hit.point - glam::Vec3::new(0.3, 0.2, 1.0)).length() < 1e-4);
+        assert!((hit.normal - glam::Vec3::Z).length() < 1e-4);
+    }
+
+    #[test]
+    fn nearest_surface_follows_the_placement_and_skips_empty_meshes() {
+        let (positions, indices) = one_quad();
+        let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
+        // Turned a quarter about X, the quad lies flat at y = -1.
+        let turned = glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        let down = Ray {
+            origin: glam::Vec3::new(0.3, 5.0, 0.2),
+            direction: glam::Vec3::new(0.0, -1.0, 0.0),
+        };
+        let nothing: &[[f32; 3]] = &[];
+        let no_indices: &[u32] = &[];
+        let placed = [
+            (glam::Mat4::IDENTITY, nothing, nothing, no_indices),
+            (
+                turned,
+                positions.as_slice(),
+                normals.as_slice(),
+                indices.as_slice(),
+            ),
+        ];
+        let hit = nearest_surface(&down, &placed).unwrap();
+        assert_eq!(hit.object, 1);
+        assert!((hit.point - glam::Vec3::new(0.3, -1.0, 0.2)).length() < 1e-4);
+        // The surface faces up, towards where the ray came from.
+        assert!((hit.normal - glam::Vec3::Y).length() < 1e-4);
+        assert!(nearest_surface(&down, &[]).is_none());
+    }
+
+    #[test]
+    fn nearest_surface_blends_the_corner_normals_so_a_curve_turns_smoothly() {
+        let positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let normals = vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]];
+        let indices = vec![0u32, 1, 2];
+        let ray = Ray {
+            origin: glam::Vec3::new(0.25, 0.25, 5.0),
+            direction: glam::Vec3::new(0.0, 0.0, -1.0),
+        };
+        let placed = [(
+            glam::Mat4::IDENTITY,
+            positions.as_slice(),
+            normals.as_slice(),
+            indices.as_slice(),
+        )];
+        let hit = nearest_surface(&ray, &placed).unwrap();
+        // Half of the first corner and a quarter of each of the others.
+        let expected = glam::Vec3::new(0.25, 0.0, 0.75).normalize();
+        assert!((hit.normal - expected).length() < 1e-4);
+    }
+
+    #[test]
     fn miss_returns_none() {
-        let (positions, indices) = two_parallel_quads();
+    let (positions, indices) = two_parallel_quads();
         let ray = Ray {
             origin: glam::Vec3::new(5.0, 5.0, 5.0),
             direction: glam::Vec3::new(0.0, 0.0, -1.0),
