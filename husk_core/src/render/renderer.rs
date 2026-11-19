@@ -1816,6 +1816,18 @@ pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeigh
         );
     }
 
+
+        /// How many screen pixels one scene unit spans at `world_point`, as of the
+    /// last rendered frame. None if the point is behind the camera.
+    pub fn pixels_per_unit_at(&self, world_point: glam::Vec3) -> Option<f32> {
+        crate::render::picking::pixels_per_unit(
+            self.last_view_proj,
+            self.width as f32,
+            self.height as f32,
+            world_point,
+        )
+    }
+
     pub fn project_to_screen(&self, world_point: glam::Vec3) -> Option<(f32, f32)> {
     crate::render::picking::project_to_screen(
             self.last_view_proj,

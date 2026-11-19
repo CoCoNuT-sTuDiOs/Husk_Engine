@@ -724,6 +724,59 @@ pub fn set_mode(name: String) -> bool {
     }
 }
 
+/// Starts a weight paint stroke on the active object, which must be in Weight
+/// Paint mode with weights computed. It paints `bone` with `weight` (0 to 1) at
+/// `strength` (0 to 1) using the blend mode `mode` ("mix", "add" or "subtract");
+/// with `accumulate` on, staying in one place builds up. The whole stroke is one
+/// undo step. Returns (true, "") or (false, why not).
+#[flutter_rust_bridge::frb(sync)]
+pub fn weight_paint_begin(
+    bone: usize,
+    mode: String,
+    weight: f32,
+    strength: f32,
+    accumulate: bool,
+) -> (bool, String) {
+    let Some(blend) = crate::rig::paint::BlendMode::from_name(&mode) else {
+        return (false, String::from("Unknown blend mode"));
+    };
+    match crate::scene::weight_stroke::begin(bone, blend, weight, strength, accumulate) {
+        Ok(()) => (true, String::new()),
+        Err(reason) => (false, reason),
+    }
+}
+
+/// One touch of the weight brush at screen pixel (x, y), with a radius of
+/// `radius_pixels` on screen. Returns whether any vertex was painted (false over
+/// empty space, or with no stroke in progress).
+#[flutter_rust_bridge::frb(sync)]
+pub fn weight_paint_step(x: f64, y: f64, radius_pixels: f32) -> bool {
+    if !(radius_pixels > 0.0) || !radius_pixels.is_finite() {
+        return false;
+    }
+    crate::platform::ffi::with_active_renderer(|renderer| {
+        let world = renderer.pick(x as f32, y as f32)?;
+        let pixels_per_unit = renderer.pixels_per_unit_at(world)?;
+        // The brush is a sphere in the object's own space, so the hit point and
+        // the radius are carried into it (an uneven scale makes it a little off).
+        let space = crate::scene::active_transform().1;
+        let local = space.point_to_local(world);
+        let scale = (space.scale.x.abs() + space.scale.y.abs() + space.scale.z.abs()) / 3.0;
+        let radius = radius_pixels / pixels_per_unit / scale.max(1e-6);
+        crate::scene::weight_stroke::step([local.x, local.y, local.z], radius, |weights| {
+            renderer.update_vertex_weights(weights)
+        })
+    })
+    .flatten()
+    .is_some_and(|painted| painted > 0)
+}
+
+/// Ends the weight paint stroke.
+#[flutter_rust_bridge::frb(sync)]
+pub fn weight_paint_end() {
+    crate::scene::weight_stroke::end();
+}
+
 /// The names of the built-in shapes, in the order the tray shows them.
 #[flutter_rust_bridge::frb(sync)]
 pub fn shape_names() -> Vec<String> {

@@ -58,5 +58,7 @@ impl Skeleton {
     }
 }
 pub mod geodesic;
+pub mod brush;
+pub mod paint;
 pub mod skinning;
 pub mod voxel;

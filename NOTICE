@@ -32,7 +32,20 @@ husk_core/src/scene/mode.rs
   set: from the checks in mode_set_ex and mode_compat_set (object_modes.cc).
 
 
+husk_core/src/rig/paint.rs
+  blend_weight: from ED_wpaint_blend_tool, wval_blend, wval_add and wval_sub
+    (paint_vertex_weight_utils.cc).
+  normalize_with_lock: from BKE_defvert_normalize_ex (deform.cc).
+  paint_vertex: the blend, clamp and normalize order of gradientVert_update and
+    paint_weight_gradient_exec (paint_vertex_weight_ops.cc).
+
+
+husk_core/src/rig/brush.rs
+  Stroke: from the weight paint stroke code (do_wpaint_brush_draw,
+    do_weight_paint_vertex_single, wpaint_blend, wpaint_clamp_monotonic).
+  falloff: from BKE_brush_curve_strength (brush.cc), the Smooth preset.
 THIRD-PARTY LIBRARIES
+
 
 Husk is built with these libraries, each under its own licence (see each
 project):

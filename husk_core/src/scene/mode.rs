@@ -82,7 +82,7 @@ fn active_of(project: &Project) -> Option<&Object> {
 
 /// The mode the active object is in: the stored mode if it was set on this
 /// very object and the object still allows it, otherwise Object.
-fn current(project: &Project) -> ObjectMode {
+pub(super) fn current(project: &Project) -> ObjectMode {
     match active_of(project) {
         Some(object)
             if project.mode != ObjectMode::Object

@@ -5,6 +5,7 @@ pub mod output;
 pub mod world;
 pub mod light;
 pub mod mode;
+pub mod weight_stroke;
 use crate::animation::channels::{Channels, Interpolation, Property, Value};
 use crate::rig::Skeleton;
 use crate::rig::skinning::VertexWeights;
