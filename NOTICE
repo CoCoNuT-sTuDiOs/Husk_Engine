@@ -1,5 +1,5 @@
 Husk
-Copyright (C) 2026 CoCoNuTsTuDiOs{Darwin}
+Copyright (C) 2026 CoCoNuTsTuDiOs
 
 Husk is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
@@ -24,7 +24,12 @@ husk_core/src/render/renderer.rs
   radius_to_dist: from ED_view3d_radius_to_dist (view3d_utils.cc).
   frame_bounds: from view3d_from_minmax (view3d_navigate_view_all.cc).
   The test that checks the six standard views uses the rotations from
-    view3d_quat_axis (view3d_utils.cc).
+      view3d_quat_axis (view3d_utils.cc).
+
+husk_core/src/scene/mode.rs
+  ObjectMode: from eObjectMode (DNA_object_enums.h).
+  mode_compat_test: from mode_compat_test (object_modes.cc).
+  set: from the checks in mode_set_ex and mode_compat_set (object_modes.cc).
 
 
 THIRD-PARTY LIBRARIES

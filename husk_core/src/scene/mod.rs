@@ -4,6 +4,7 @@ pub mod material;
 pub mod output;
 pub mod world;
 pub mod light;
+pub mod mode;
 use crate::animation::channels::{Channels, Interpolation, Property, Value};
 use crate::rig::Skeleton;
 use crate::rig::skinning::VertexWeights;
@@ -841,7 +842,13 @@ pub fn active_after_removal(active: usize, removed: usize) -> usize {
 /// The whole project: a list of scenes, and which one is open.
 pub struct Project {
     pub scenes: Vec<Scene>,
-    pub active_scene: usize,
+        pub active_scene: usize,
+    /// The mode the active object is being worked in. It belongs to the object
+    /// whose id is `mode_object`, and is read through `mode::active_mode`, which
+    /// checks both. Working state: not saved in a project file, not part of undo.
+    pub mode: mode::ObjectMode,
+    /// The id of the object `mode` was set on.
+    pub mode_object: u64,
 }
 
 /// A lock that keeps working after a panic. A std `Mutex` is "poisoned" when
@@ -885,6 +892,8 @@ impl<T> RecoveringMutex<T> {
 static PROJECT: RecoveringMutex<Project> = RecoveringMutex::new(Project {
     scenes: Vec::new(),
     active_scene: 0,
+    mode: mode::ObjectMode::Object,
+    mode_object: 0,
 });
 
 /// Holds the project lock and gives access to the active object.
@@ -969,7 +978,12 @@ pub fn set_active_object(index: usize) -> bool {
     if index >= scene.objects.len() {
         return false;
     }
+        let changed = scene.active_object != index;
     scene.active_object = index;
+    // Picking another object leaves the mode.
+    if changed {
+        guard.mode = mode::ObjectMode::Object;
+    }
     true
 }
 
@@ -1163,6 +1177,8 @@ pub fn replace_scene(scene: Scene) {
     } else {
         let index = guard.active_scene;
         guard.scenes[index] = scene;
+        // A new scene's objects have new ids, so the old mode is over.
+        guard.mode = mode::ObjectMode::Object;
     }
 }
 

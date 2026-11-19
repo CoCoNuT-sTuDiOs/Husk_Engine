@@ -34,6 +34,7 @@ enum HuskCommand {
   toolScaleObject,
   toggleToolPanel,
   toggleSidePanel,
+  toggleMode,
 }
 
 /// One row of the key table.
@@ -152,6 +153,7 @@ KeyBinding(HuskCommand.deleteObject, [LogicalKeyboardKey.delete]),
   KeyBinding(HuskCommand.toolScaleObject, [LogicalKeyboardKey.keyS]),
   KeyBinding(HuskCommand.toggleToolPanel, [LogicalKeyboardKey.keyT]),
   KeyBinding(HuskCommand.toggleSidePanel, [LogicalKeyboardKey.keyN]),
+  KeyBinding(HuskCommand.toggleMode, [LogicalKeyboardKey.tab], ctrl: true),
   KeyBinding(
     HuskCommand.toggleMaximize,
     [LogicalKeyboardKey.space],

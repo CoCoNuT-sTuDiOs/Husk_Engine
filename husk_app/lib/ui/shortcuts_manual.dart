@@ -79,16 +79,29 @@ const List<ShortcutSection> shortcutSections = [
     ShortcutEntry('T', 'Hide or show the tool strip on the left'),
     ShortcutEntry('N', 'Hide or show the side panel on the right'),
   ]),
-  ShortcutSection('Tools', [
+    ShortcutSection('Tools (Object Mode)', [
     ShortcutEntry('G', 'Switch to the Move object tool'),
     ShortcutEntry('R', 'Switch to the Rotate object tool'),
     ShortcutEntry('S', 'Switch to the Scale object tool'),
+  ]),
+  ShortcutSection('Modes', [
+    ShortcutEntry(
+      'Ctrl+Tab',
+      'Switch between Object Mode and Pose Mode (a rig, or a mesh that has bones)',
+    ),
+    ShortcutEntry(
+      'Mode menu (viewport header)',
+      'Pick Object Mode, Pose Mode or Weight Paint, whichever the active object allows',
+    ),
   ]),
   ShortcutSection('Animation', [
     ShortcutEntry('Space', 'Play or pause the animation'),
   ]),
   ShortcutSection('In the viewport', [
-    ShortcutEntry('Click a joint dot', 'Select that joint, with any tool'),
+    ShortcutEntry(
+      'Click a joint dot',
+      'Select that joint (Pose Mode, or with the Place bones tool)',
+    ),
     ShortcutEntry(
       'Click an object',
       'Make it the active object (Select, Move object, Rotate object and '
@@ -96,11 +109,11 @@ const List<ShortcutSection> shortcutSections = [
     ),
     ShortcutEntry('Click (Place bones tool)', 'Place a bone'),
     ShortcutEntry(
-      'Drag a joint (Select tool)',
+      'Drag a joint (Select tool, Pose Mode)',
       'Pose it: swings its parent, or bends the limb above it when IK is '
           'on. Dragging a root joint moves the whole character',
     ),
-    ShortcutEntry('Drag (Move tool)', 'Move the whole character'),
+    ShortcutEntry('Drag (Move tool, Pose Mode)', 'Move the whole character'),
     ShortcutEntry(
       'Drag an arrow (Move object tool)',
       'Move the object along that axis',

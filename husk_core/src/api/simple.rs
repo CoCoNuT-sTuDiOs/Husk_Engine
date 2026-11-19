@@ -698,6 +698,32 @@ pub fn active_object_locked() -> bool {
     crate::scene::active_locked()
 }
 
+/// The mode the active object is in: "object", "pose" or "weight_paint".
+#[flutter_rust_bridge::frb(sync)]
+pub fn active_mode() -> String {
+    crate::scene::mode::active_mode().name().to_string()
+}
+
+/// The modes the active object allows, in the order the mode menu lists them.
+#[flutter_rust_bridge::frb(sync)]
+pub fn available_modes() -> Vec<String> {
+    crate::scene::mode::available_modes()
+        .into_iter()
+        .map(|mode| mode.name().to_string())
+        .collect()
+}
+
+/// Puts the active object in the named mode ("object", "pose" or
+/// "weight_paint"). False, changing nothing, for an unknown name or a mode the
+/// active object does not allow.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_mode(name: String) -> bool {
+    match crate::scene::mode::ObjectMode::from_name(&name) {
+        Some(mode) => crate::scene::mode::set_mode(mode),
+        None => false,
+    }
+}
+
 /// The names of the built-in shapes, in the order the tray shows them.
 #[flutter_rust_bridge::frb(sync)]
 pub fn shape_names() -> Vec<String> {

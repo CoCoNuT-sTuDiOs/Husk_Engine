@@ -113,7 +113,59 @@ class StudioController extends ChangeNotifier {
   /// True while the viewport fills the window and the other panes are hidden.
   bool get viewportMaximized => _viewportMaximized;
 
-  StudioTool get tool => _tool;
+    /// The tools each mode offers. Place bones stays in Object mode until the
+  /// rig gets its own Edit mode.
+  static List<StudioTool> toolsInMode(String mode) {
+    switch (mode) {
+      case 'pose':
+        return const [StudioTool.select, StudioTool.move];
+      case 'weight_paint':
+        return const [StudioTool.select];
+      default:
+        return const [
+          StudioTool.select,
+          StudioTool.placeBones,
+          StudioTool.moveObject,
+          StudioTool.rotateObject,
+          StudioTool.scaleObject,
+        ];
+    }
+  }
+
+  /// The tool in use. A tool the current mode does not offer is not in use:
+  /// Select stands in, so the viewport, the header and the keys agree.
+  StudioTool get tool =>
+      toolsInMode(mode).contains(_tool) ? _tool : StudioTool.select;
+
+  /// The mode the active object is in: 'object', 'pose' or 'weight_paint'.
+  /// The Rust core owns it; this only reads it.
+  String get mode => rust.activeMode();
+
+  /// The modes the active object allows, in menu order.
+  List<String> get availableModes => rust.availableModes();
+
+  /// Puts the active object in the named mode. Returns a message when the
+  /// object does not allow it.
+  String? setMode(String name) {
+    if (rust.setMode(name: name)) {
+      notifyListeners();
+      return null;
+    }
+    switch (name) {
+      case 'pose':
+        return 'Pose Mode needs a rig, or a mesh that has bones. '
+            'Use Place bones first.';
+      case 'weight_paint':
+        return 'Weight Paint needs a mesh that has bones. '
+            'Use Place bones first.';
+      default:
+        return 'This object cannot go into that mode';
+    }
+  }
+
+  /// Ctrl+Tab: between Object mode and Pose mode, as Blender does on an
+  /// armature.
+  String? toggleObjectPose() => setMode(mode == 'pose' ? 'object' : 'pose');
 
   /// When on, dragging the end of a limb bends the joints above it.
   bool get ikMode => _ikMode;
@@ -129,11 +181,18 @@ class StudioController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setTool(StudioTool tool) {
-    if (_tool == tool) return;
+  /// Chooses a tool. Returns a message when the current mode does not offer it.
+  String? setTool(StudioTool tool) {
+    if (!toolsInMode(mode).contains(tool)) {
+      return 'That tool is not available in this mode. '
+          'Ctrl+Tab or the mode menu changes the mode.';
+    }
+    if (_tool == tool) return null;
     _tool = tool;
     notifyListeners();
+    return null;
   }
+
 
   void toggleIk() {
     _ikMode = !_ikMode;

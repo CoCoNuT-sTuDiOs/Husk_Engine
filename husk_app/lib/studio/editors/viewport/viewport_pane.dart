@@ -183,8 +183,12 @@ int? _gizmoAxis;
   }
 
   void _handleTap(TapUpDetails details, double scale) {
-    // Tapping a joint dot always selects it.
-    final hit = _viewport.jointAt(details.localPosition, scale);
+        // In Pose Mode, or while placing bones (to pick a parent), tapping a joint
+    // dot selects it. In Object Mode the joints cannot be selected.
+    final jointsOn =
+        _studio.mode == 'pose' || _studio.tool == StudioTool.placeBones;
+    final hit =
+        jointsOn ? _viewport.jointAt(details.localPosition, scale) : null;
     if (hit != null) {
       _studio.selectBone(hit);
       return;
@@ -221,7 +225,10 @@ int? _gizmoAxis;
       case StudioTool.move:
         _dragMovesCharacter = true;
       case StudioTool.select:
-        final joint = _viewport.jointAt(details.localPosition, scale);
+         // Only Pose Mode poses joints; in Object Mode a drag orbits.
+        final joint = _studio.mode == 'pose'
+            ? _viewport.jointAt(details.localPosition, scale)
+            : null;
         _draggedJoint = joint;
         // A root joint has no parent to swing around: dragging it moves
         // the whole character.

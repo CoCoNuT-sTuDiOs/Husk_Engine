@@ -243,6 +243,19 @@ List<bool> objectLocks() => RustLib.instance.api.crateApiSimpleObjectLocks();
 bool activeObjectLocked() =>
     RustLib.instance.api.crateApiSimpleActiveObjectLocked();
 
+/// The mode the active object is in: "object", "pose" or "weight_paint".
+String activeMode() => RustLib.instance.api.crateApiSimpleActiveMode();
+
+/// The modes the active object allows, in the order the mode menu lists them.
+List<String> availableModes() =>
+    RustLib.instance.api.crateApiSimpleAvailableModes();
+
+/// Puts the active object in the named mode ("object", "pose" or
+/// "weight_paint"). False, changing nothing, for an unknown name or a mode the
+/// active object does not allow.
+bool setMode({required String name}) =>
+    RustLib.instance.api.crateApiSimpleSetMode(name: name);
+
 /// The names of the built-in shapes, in the order the tray shows them.
 List<String> shapeNames() => RustLib.instance.api.crateApiSimpleShapeNames();
 

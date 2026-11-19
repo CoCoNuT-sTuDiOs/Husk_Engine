@@ -5,16 +5,19 @@ import 'package:husk_app/src/rust/api/simple.dart' as rust;
 import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
 
-/// The most width the start card takes.
-const double _splashWidth = 920;
+/// The height of the picture across the top of the page.
+const double _heroHeight = 400;
 
-/// The height of the picture at the top of the start card.
-const double _heroHeight = 250;
+/// The width of the side panel on the left.
+const double _sidebarWidth = 240;
 
-/// The page Husk opens on, laid out like Blender's start screen: a picture
-/// across the top of a centred card, then a list of ways to start and a list of
-/// places to get help. The projects Husk keeps for you sit in the left list,
-/// one row per slot.
+/// Height of a project slot (filled or empty).
+const double _slotHeight = 220;
+
+/// The page Husk opens on, laid out like Blender's start screen with a side
+/// panel: the Husk picture across the full width of the page, the two big
+/// boxes (New project and Open a file) under it, then the projects Husk keeps
+/// for you, one slot each. The places to go sit in the panel on the left.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -146,103 +149,144 @@ class _HomeScreenState extends State<HomeScreen> {
     final full = _projects.length >= _limit;
     return Scaffold(
       backgroundColor: HuskColors.app,
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _splashWidth),
-            child: Material(
-              color: HuskColors.panel,
-              elevation: 12,
-              shadowColor: Colors.black,
-              clipBehavior: Clip.antiAlias,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: const BorderSide(color: HuskColors.border),
-              ),
+
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _sidebar(),
+          Expanded(
+            child: SingleChildScrollView(
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const _HeroBanner(),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(32, 26, 32, 30),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 6, child: _leftColumn(full)),
-                        const SizedBox(width: 44),
-                        Expanded(flex: 4, child: _rightColumn()),
-                      ],
-                    ),
+                    padding: const EdgeInsets.fromLTRB(32, 28, 32, 32),
+                    child: _mainColumn(full),
                   ),
                 ],
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _leftColumn(bool full) {
+  Widget _mainColumn(bool full) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionLabel('New'),
-        _NewProjectButton(full: full, onTap: _newProject),
-        const SizedBox(height: 4),
-        _LinkRow(
-          icon: Icons.folder_open_outlined,
-          label: 'Open a file...',
-          onTap: widget.onOpenFile,
+        Row(
+          children: [
+            Expanded(
+              child: _NewProjectButton(full: full, onTap: _newProject),
+            ),
+          ],
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 30),
+
         Row(
           children: [
             const _SectionLabel('Your projects'),
             const Spacer(),
+            _OpenFileButton(onTap: widget.onOpenFile),
+            const SizedBox(width: 16),
             _SlotMeter(used: _projects.length, limit: _limit),
           ],
         ),
-        for (var i = 0; i < _limit; i++) ...[
-          if (i < _projects.length)
-            _ProjectRow(
-              project: _projects[i],
-              image: _thumbnails[_projects[i].path],
-              onOpen: () => widget.onOpenProject(_projects[i].path),
-              onDelete: () => _delete(_projects[i]),
-            )
-          else
-            _EmptyRow(onTap: _newProject),
-          const SizedBox(height: 8),
-        ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < _limit; i++) ...[
+              if (i > 0) const SizedBox(width: 16),
+              Expanded(
+                child: i < _projects.length
+                    ? _ProjectRow(
+                        project: _projects[i],
+                        image: _thumbnails[_projects[i].path],
+                        onOpen: () => widget.onOpenProject(_projects[i].path),
+                        onDelete: () => _delete(_projects[i]),
+                      )
+                    : _EmptyRow(onTap: _newProject),
+              ),
+            ],
+          ],
+        ),
       ],
     );
   }
 
-  Widget _rightColumn() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _SectionLabel('Getting started'),
-        if (widget.onBackToScene != null)
-          _LinkRow(
-            icon: Icons.arrow_back,
-            label: 'Back to your scene',
-            onTap: widget.onBackToScene!,
+  /// The panel down the left: the Husk name, then the places to go.
+  Widget _sidebar() {
+    return Container(
+      width: _sidebarWidth,
+      padding: const EdgeInsets.fromLTRB(12, 22, 12, 16),
+      decoration: const BoxDecoration(
+        color: HuskColors.panel,
+        border: Border(right: BorderSide(color: HuskColors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 22),
+            child: Row(
+              children: [
+                Image.asset('assets/images/husk_logo.png', height: 30),
+                const SizedBox(width: 10),
+                const Text(
+                  'HUSK',
+                  style: TextStyle(
+                    color: HuskColors.orange,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 2.5,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
           ),
-        _LinkRow(
-          icon: Icons.keyboard_outlined,
-          label: 'Keyboard shortcuts',
-          onTap: widget.onShowShortcuts,
-        ),
-        _LinkRow(
-          icon: Icons.info_outline,
-          label: 'About Husk',
-          onTap: widget.onShowAbout,
-        ),
-      ],
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: HuskColors.elevated,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.home_outlined, size: 18, color: HuskColors.orange),
+                SizedBox(width: 12),
+                Text(
+                  'Home',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+          if (widget.onBackToScene != null)
+            _LinkRow(
+              icon: Icons.arrow_back,
+              label: 'Back to your scene',
+              onTap: widget.onBackToScene!,
+            ),
+          _LinkRow(
+            icon: Icons.folder_open_outlined,
+            label: 'Open a file...',
+            onTap: widget.onOpenFile,
+          ),
+          _LinkRow(
+            icon: Icons.keyboard_outlined,
+            label: 'Keyboard shortcuts',
+            onTap: widget.onShowShortcuts,
+          ),
+          _LinkRow(
+            icon: Icons.info_outline,
+            label: 'About Husk',
+            onTap: widget.onShowAbout,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -264,8 +308,8 @@ String _sizeText(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
-/// The picture across the top of the card, with the Husk logo on its left and
-/// the version on its right. It shows `assets/images/home_hero.jpg` (or
+/// The picture across the full width of the page, with the version on its
+/// right. It shows `assets/images/home_hero.jpg` (or
 /// `home_hero.png`), and a plain placeholder until that picture exists.
 class _HeroBanner extends StatelessWidget {
   const _HeroBanner();
@@ -281,13 +325,13 @@ class _HeroBanner extends StatelessWidget {
             'assets/images/home_hero.jpg',
             fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) => Image.asset(
-              'assets/images/home_hero.png',
+              'assets/images/home_hero.jpg',
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) =>
                   const _HeroPlaceholder(),
             ),
           ),
-          // Darkens the top so the logo reads on any picture.
+          // Darkens the top so the version label reads on any picture.
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -297,25 +341,7 @@ class _HeroBanner extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(
-            left: 24,
-            top: 20,
-            child: Row(
-              children: [
-                Image.asset('assets/images/husk_logo.png', height: 34),
-                const SizedBox(width: 10),
-                const Text(
-                  'HUSK',
-                  style: TextStyle(
-                    color: HuskColors.orange,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2.5,
-                    fontSize: 20,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          // The logo sits in the side panel; the picture carries only the version.
           Positioned(
             right: 20,
             top: 18,
@@ -403,29 +429,50 @@ class _NewProjectButton extends StatelessWidget {
     final ink = full ? HuskColors.textSecondary : HuskColors.canvas;
     return Material(
       color: full ? HuskColors.elevated : HuskColors.orange,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         hoverColor: Colors.white.withValues(alpha: 0.10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: SizedBox(
+          height: 150,
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add, size: 20, color: ink),
-              const SizedBox(width: 10),
-              Text(
-                'New project',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
                   color: ink,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.add,
+                  size: 28,
+                  color: full ? HuskColors.elevated : HuskColors.orange,
                 ),
               ),
-              const Spacer(),
-              Text(
-                full ? 'both slots used' : 'empty scene',
-                style: TextStyle(fontSize: 12, color: ink.withValues(alpha: 0.75)),
+              const SizedBox(width: 18),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'New project',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: ink,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    full ? 'both slots used' : 'start with an empty scene',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: ink.withValues(alpha: 0.75),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -460,8 +507,56 @@ class _LinkRow extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: HuskColors.textSecondary),
               const SizedBox(width: 12),
-              Text(label, style: const TextStyle(fontSize: 14)),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The second big box, beside New project: opens a project file from anywhere.
+class _OpenFileButton extends StatelessWidget {
+  const _OpenFileButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: HuskColors.elevated,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          hoverColor: Colors.white.withValues(alpha: 0.06),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.folder_open_outlined,
+                  size: 16,
+                  color: HuskColors.orange,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Open a .husk file...',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -517,86 +612,90 @@ class _ProjectRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initial =
-        project.name.isEmpty ? '?' : project.name.substring(0, 1).toUpperCase();
+    final initial = project.name.isEmpty
+        ? '?'
+        : project.name.substring(0, 1).toUpperCase();
     return Material(
-      type: MaterialType.transparency,
+      color: HuskColors.panel,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onOpen,
-        borderRadius: BorderRadius.circular(8),
         hoverColor: HuskColors.elevated,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
+        child: SizedBox(
+          height: _slotHeight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: 96,
-                  height: 54,
-                  child: image != null
-                      ? RawImage(image: image, fit: BoxFit.cover)
-                      : Container(
-                          color: HuskColors.elevated,
-                          alignment: Alignment.center,
-                          child: Text(
-                            initial,
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w700,
-                              color: HuskColors.orange.withValues(alpha: 0.7),
-                            ),
+              Expanded(
+                child: image != null
+                    ? RawImage(image: image, fit: BoxFit.cover)
+                    : Container(
+                        color: HuskColors.elevated,
+                        alignment: Alignment.center,
+                        child: Text(
+                          initial,
+                          style: TextStyle(
+                            fontSize: 48,
+                            fontWeight: FontWeight.w700,
+                            color: HuskColors.orange.withValues(alpha: 0.7),
                           ),
                         ),
-                ),
+                      ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
+                child: Row(
                   children: [
-                    Text(
-                      project.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            project.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Changed ${_agoText(project.secondsAgo.toInt())}'
+                            '  ·  ${_sizeText(project.bytes.toInt())}',
+                            style: HuskText.readout,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Changed ${_agoText(project.secondsAgo.toInt())}'
-                      '  ·  ${_sizeText(project.bytes.toInt())}',
-                      style: HuskText.readout,
+                    PopupMenuButton<String>(
+                      tooltip: 'More',
+                      icon: const Icon(
+                        Icons.more_horiz,
+                        size: 18,
+                        color: HuskColors.textSecondary,
+                      ),
+                      onSelected: (choice) {
+                        if (choice == 'open') {
+                          onOpen();
+                        } else {
+                          onDelete();
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: 'open', child: Text('Open')),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text(
+                            'Delete',
+                            style: TextStyle(color: HuskColors.error),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'More',
-                icon: const Icon(
-                  Icons.more_horiz,
-                  size: 18,
-                  color: HuskColors.textSecondary,
-                ),
-                onSelected: (choice) {
-                  if (choice == 'open') {
-                    onOpen();
-                  } else {
-                    onDelete();
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'open', child: Text('Open')),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Text(
-                      'Delete',
-                      style: TextStyle(color: HuskColors.error),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -606,7 +705,6 @@ class _ProjectRow extends StatelessWidget {
   }
 }
 
-/// A free project slot: a plain outlined row that starts a new project.
 class _EmptyRow extends StatelessWidget {
   const _EmptyRow({required this.onTap});
 
@@ -618,28 +716,73 @@ class _EmptyRow extends StatelessWidget {
       type: MaterialType.transparency,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         hoverColor: HuskColors.elevated,
-        child: Container(
-          height: 70,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: HuskColors.border),
+        child: CustomPaint(
+          foregroundPainter: _DashedBorderPainter(
+            color: HuskColors.textSecondary.withValues(alpha: 0.45),
           ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.add, size: 18, color: HuskColors.orange),
-              SizedBox(width: 8),
-              Text(
-                'Empty slot',
-                style: TextStyle(fontSize: 14, color: HuskColors.textSecondary),
+          child: const SizedBox(
+            height: _slotHeight,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add, size: 30, color: HuskColors.orange),
+                  SizedBox(height: 8),
+                  Text(
+                    'Empty slot',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: HuskColors.textSecondary,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+/// A free project slot: a plain outlined row that starts a new project.
+
+/// Draws a dashed rounded-rectangle outline.
+class _DashedBorderPainter extends CustomPainter {
+  const _DashedBorderPainter({
+    required this.color,
+    this.radius = 12,
+    this.dash = 8,
+    this.gap = 6,
+  });
+
+  final Color color;
+  final double radius;
+  final double dash;
+  final double gap;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)),
+      );
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        canvas.drawPath(metric.extractPath(distance, distance + dash), paint);
+        distance += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter old) =>
+      old.color != color || old.radius != radius;
 }

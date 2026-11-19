@@ -51,6 +51,7 @@ final collapsed = studio.toolsCollapsed && !floating;
               ),
             );
           }
+          final allowed = StudioController.toolsInMode(studio.mode);
           return Column(
             // Floating, it is only as tall as its buttons; in the window's
             // left edge it fills the height as before.
@@ -71,36 +72,43 @@ final collapsed = studio.toolsCollapsed && !floating;
                   ),
                   onPressed: studio.toggleToolsCollapsed,
                 ),
+
+              if (allowed.contains(StudioTool.select))
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.cursor),
-                tooltip: 'Select and pose',
+                tooltip: 'Select',
                 selected: studio.tool == StudioTool.select,
                 onTap: () => studio.setTool(StudioTool.select),
               ),
+              if (allowed.contains(StudioTool.placeBones))
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.bone),
                 tooltip: 'Place bones',
                 selected: studio.tool == StudioTool.placeBones,
                 onTap: () => studio.setTool(StudioTool.placeBones),
               ),
+              if (allowed.contains(StudioTool.move))
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.arrowsLeftRight),
                 tooltip: 'Move character (animation)',
                 selected: studio.tool == StudioTool.move,
                 onTap: () => studio.setTool(StudioTool.move),
               ),
+              if (allowed.contains(StudioTool.moveObject))
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.arrowsOutCardinal),
                 tooltip: 'Move object',
                 selected: studio.tool == StudioTool.moveObject,
                 onTap: () => studio.setTool(StudioTool.moveObject),
               ),
+              if (allowed.contains(StudioTool.rotateObject))
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.arrowsClockwise),
                 tooltip: 'Rotate object',
                 selected: studio.tool == StudioTool.rotateObject,
                 onTap: () => studio.setTool(StudioTool.rotateObject),
               ),
+              if (allowed.contains(StudioTool.scaleObject))
               _ToolButton(
                 icon: PhosphorIcon(PhosphorIconsRegular.boundingBox),
                 tooltip: 'Scale object',

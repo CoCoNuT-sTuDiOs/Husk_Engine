@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:husk_app/studio/editors/viewport/mode_menu.dart';
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
@@ -15,7 +16,7 @@ class ViewportToolStrip extends StatelessWidget {
   String _toolName(StudioTool tool) {
     switch (tool) {
       case StudioTool.select:
-        return 'Select and pose';
+        return 'Select';
       case StudioTool.placeBones:
         return 'Place bones';
       case StudioTool.move:
@@ -30,6 +31,22 @@ class ViewportToolStrip extends StatelessWidget {
   }
 
   List<Widget> _options(BuildContext context, StudioController studio) {
+        if (studio.mode == 'weight_paint') {
+      return [
+        const Text(
+          'Weight Paint: the brush arrives in the next step',
+          style: HuskText.readout,
+        ),
+      ];
+    }
+    if (studio.tool == StudioTool.select && studio.mode != 'pose') {
+      return [
+        const Text(
+          'Click an object to select it. Ctrl+Tab for Pose Mode',
+          style: HuskText.readout,
+        ),
+      ];
+    }
     switch (studio.tool) {
       case StudioTool.select:
         return [
@@ -99,6 +116,8 @@ class ViewportToolStrip extends StatelessWidget {
           final maximized = studio.viewportMaximized;
           return Row(
             children: [
+               ModeMenu(actions: actions),
+              const SizedBox(width: 14),
               Text(
                 _toolName(studio.tool),
                 style: const TextStyle(

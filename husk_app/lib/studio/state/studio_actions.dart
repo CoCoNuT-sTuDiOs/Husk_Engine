@@ -258,7 +258,15 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
   void setParent(BuildContext context, int child, int? parent) =>
       showMessage(context, studio.setParent(child, parent));
 
-  void resetPose() => studio.resetPose();
+    void resetPose() => studio.resetPose();
+
+  /// Puts the active object in the named mode (the mode menu).
+  void setMode(BuildContext context, String name) =>
+      showMessage(context, studio.setMode(name));
+
+  /// Ctrl+Tab: between Object mode and Pose mode.
+  void toggleMode(BuildContext context) =>
+      showMessage(context, studio.toggleObjectPose());
 
   void setLocked(BuildContext context, int index, bool locked) =>
       showMessage(context, studio.setLocked(index, locked));
@@ -430,10 +438,12 @@ void toggleSidePanel() => studio.toggleSidePanelCollapsed();
         toggleToolPanel();
       case HuskCommand.toggleSidePanel:
         toggleSidePanel();
+      case HuskCommand.toggleMode:
+        toggleMode(context);
       case HuskCommand.toolMoveObject:
-        studio.setTool(StudioTool.moveObject);
+         showMessage(context, studio.setTool(StudioTool.moveObject));
       case HuskCommand.toolRotateObject:
-        studio.setTool(StudioTool.rotateObject);
+          showMessage(context, studio.setTool(StudioTool.rotateObject));
       case HuskCommand.toolScaleObject:
         studio.setTool(StudioTool.scaleObject);
     }
