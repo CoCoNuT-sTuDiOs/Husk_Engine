@@ -7,7 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:husk_app/studio/editors/tools/tool_column.dart';
 import 'package:husk_app/studio/editors/viewport/frame_overlay.dart';
 
+import 'package:husk_app/studio/editors/viewport/brush_cursor_overlay.dart';
+import 'package:husk_app/studio/editors/viewport/first_time_hint.dart';
 import 'package:husk_app/studio/editors/viewport/gizmo_overlay.dart';
+import 'package:husk_app/studio/editors/viewport/weight_brush_bar.dart';
 import 'package:husk_app/studio/editors/viewport/maximized_bar.dart';
 import 'package:husk_app/studio/editors/viewport/skeleton_overlay.dart';
 import 'package:husk_app/studio/editors/viewport/viewport_tool_strip.dart';
@@ -54,6 +57,11 @@ class _ViewportPaneState extends State<ViewportPane> {
   BigInt? _draggedJoint;
   bool _dragMovesCharacter = false;
 
+  // Whether a weight paint stroke is in progress, and where the brush circle
+  // is drawn (null until the cursor has been over the viewport).
+  bool _painting = false;
+  final ValueNotifier<Offset?> _brushCursor = ValueNotifier<Offset?>(null);
+
 
 int? _gizmoAxis;
 
@@ -93,6 +101,7 @@ int? _gizmoAxis;
     _resizeTimer?.cancel();
     _overlayTick.dispose();
     _gizmoHighlight.dispose();
+    _brushCursor.dispose();
     super.dispose();
   }
 
@@ -155,6 +164,51 @@ int? _gizmoAxis;
     });
   }
 
+
+/// Whether the left button paints weights here: Weight Paint mode, and the
+  /// pointer is not on a joint dot (a click on a dot picks that bone).
+  bool _paintsAt(Offset pointer, double scale) =>
+      _studio.mode == 'weight_paint' &&
+      _viewport.jointAt(pointer, scale) == null;
+
+  void _paintDown(PointerDownEvent event, double scale) {
+    if (event.buttons != kPrimaryMouseButton) return;
+    if (!_paintsAt(event.localPosition, scale)) return;
+    final message = _studio.beginPaintStroke(
+      erase: HardwareKeyboard.instance.isControlPressed,
+      smooth: HardwareKeyboard.instance.isShiftPressed,
+    );
+    if (message != null) {
+      showMessage(context, message);
+      return;
+    }
+    _painting = true;
+    _paintAt(event.localPosition, scale);
+  }
+
+  void _paintMove(PointerMoveEvent event, double scale) {
+    _brushCursor.value = event.localPosition;
+    if (_painting && event.buttons == kPrimaryMouseButton) {
+      _paintAt(event.localPosition, scale);
+    }
+  }
+
+  /// One touch of the brush. The radius is in panel pixels; the engine
+  /// measures in render pixels.
+  void _paintAt(Offset pointer, double scale) {
+    _studio.paintStep(
+      pointer.dx / scale,
+      pointer.dy / scale,
+      _studio.brushRadius / scale,
+    );
+  }
+
+  void _paintUp() {
+    if (!_painting) return;
+    _painting = false;
+    _studio.endPaintStroke();
+  }
+
   /// Dragging with the middle mouse button turns the view; with Shift held
   /// it slides the view instead, as in Blender.
   void _handleMiddleDrag(PointerMoveEvent event, double scale) {
@@ -186,11 +240,19 @@ int? _gizmoAxis;
         // In Pose Mode, or while placing bones (to pick a parent), tapping a joint
     // dot selects it. In Object Mode the joints cannot be selected.
     final jointsOn =
-        _studio.mode == 'pose' || _studio.tool == StudioTool.placeBones;
+          _studio.mode == 'pose' ||
+        _studio.mode == 'weight_paint' ||
+        _studio.tool == StudioTool.placeBones;
     final hit =
         jointsOn ? _viewport.jointAt(details.localPosition, scale) : null;
     if (hit != null) {
       _studio.selectBone(hit);
+      return;
+    }
+
+    if (_studio.mode == 'weight_paint') {
+      // The brush owns the left button here: a click that is not on a joint
+      // dot was a brush touch.
       return;
     }
     if (_studio.tool == StudioTool.placeBones) {
@@ -252,6 +314,7 @@ int? _gizmoAxis;
   void _handlePanUpdate(DragUpdateDetails details, double scale) {
     final x = details.localPosition.dx / scale;
     final y = details.localPosition.dy / scale;
+    if (_painting) return;
     if (_surfaceDrag) {
       _updateSurfaceDrag(details.localPosition, scale);
       return;
@@ -503,8 +566,17 @@ void _endDrag() {
         final scale = constraints.maxWidth / _renderSize.width;
         final render = Listener(
           onPointerSignal: _handlePointerSignal,
-          onPointerHover: (event) => _updateHover(event.localPosition, scale),
-          onPointerMove: (event) => _handleMiddleDrag(event, scale),
+          onPointerHover: (event) {
+            _brushCursor.value = event.localPosition;
+            _updateHover(event.localPosition, scale);
+          },
+          onPointerDown: (event) => _paintDown(event, scale),
+          onPointerMove: (event) {
+            _paintMove(event, scale);
+            _handleMiddleDrag(event, scale);
+          },
+          onPointerUp: (_) => _paintUp(),
+          onPointerCancel: (_) => _paintUp(),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapUp: (details) => _handleTap(details, scale),
@@ -516,6 +588,14 @@ void _endDrag() {
               fit: StackFit.expand,
               children: [
                 Texture(textureId: textureId),
+                IgnorePointer(
+                  child: CustomPaint(
+                    painter: BrushCursorPainter(
+                      studio: _studio,
+                      cursor: _brushCursor,
+                    ),
+                  ),
+                ),
                 IgnorePointer(
                   child: CustomPaint(
                     painter: FrameOverlayPainter(
@@ -629,8 +709,9 @@ void _endDrag() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ViewportToolStrip(actions: widget.actions),
-        Expanded(
+
+      ViewportToolStrip(actions: widget.actions),
+        WeightBrushBar(actions: widget.actions),        Expanded(
           child: Container(
             color: HuskColors.canvas,
             child: _graphicsError != null
@@ -643,6 +724,22 @@ void _endDrag() {
                     fit: StackFit.expand,
                     children: [
                       _buildRender(context, textureId),
+                      Positioned(
+                        right: 14,
+                        top: 14,
+                        child: FirstTimeHint(
+                          studio: _studio,
+                          id: 'weight_paint',
+                          visibleWhen: (studio) => studio.mode == 'weight_paint',
+                          title: 'Weight Paint',
+                          lines: const [
+                            'Colours show how much the selected joint moves each part of the mesh: red is fully, blue is not at all.',
+                            'Drag on the mesh to paint that joint\'s weight. Ctrl + drag takes it away, Shift + drag smooths it.',
+                            'Click a joint dot to pick another joint. Middle drag orbits.',
+                            'Weight, Strength, Radius and the blend modes are in the bar above. [ and ] resize the brush.',
+                          ],
+                        ),
+                      ),
                       if (_studio.viewportMaximized)
                         Positioned(
                           left: 12,

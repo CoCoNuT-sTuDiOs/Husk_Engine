@@ -32,12 +32,7 @@ class ViewportToolStrip extends StatelessWidget {
 
   List<Widget> _options(BuildContext context, StudioController studio) {
         if (studio.mode == 'weight_paint') {
-      return [
-        const Text(
-          'Weight Paint: the brush arrives in the next step',
-          style: HuskText.readout,
-        ),
-      ];
+          return const <Widget>[];
     }
     if (studio.tool == StudioTool.select && studio.mode != 'pose') {
       return [
@@ -119,7 +114,7 @@ class ViewportToolStrip extends StatelessWidget {
                ModeMenu(actions: actions),
               const SizedBox(width: 14),
               Text(
-                _toolName(studio.tool),
+                studio.mode == 'weight_paint' ? 'Weight brush' : _toolName(studio.tool),
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,

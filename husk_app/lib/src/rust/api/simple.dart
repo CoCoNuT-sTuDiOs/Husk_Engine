@@ -256,6 +256,46 @@ List<String> availableModes() =>
 bool setMode({required String name}) =>
     RustLib.instance.api.crateApiSimpleSetMode(name: name);
 
+/// Starts a weight paint stroke on the active object, which must be in Weight
+/// Paint mode with weights computed. It paints `bone` with `weight` (0 to 1) at
+/// `strength` (0 to 1) using the blend mode `mode` ("mix", "add" or "subtract");
+/// with `accumulate` on, staying in one place builds up. The whole stroke is one
+/// undo step. Returns (true, "") or (false, why not).
+(bool, String) weightPaintBegin({
+  required BigInt bone,
+  required String mode,
+  required double weight,
+  required double strength,
+  required bool accumulate,
+}) => RustLib.instance.api.crateApiSimpleWeightPaintBegin(
+  bone: bone,
+  mode: mode,
+  weight: weight,
+  strength: strength,
+  accumulate: accumulate,
+);
+
+/// One touch of the weight brush at screen pixel (x, y), with a radius of
+/// `radius_pixels` on screen. Returns whether any vertex was painted (false over
+/// empty space, or with no stroke in progress).
+bool weightPaintStep({
+  required double x,
+  required double y,
+  required double radiusPixels,
+}) => RustLib.instance.api.crateApiSimpleWeightPaintStep(
+  x: x,
+  y: y,
+  radiusPixels: radiusPixels,
+);
+
+/// Ends the weight paint stroke.
+void weightPaintEnd() => RustLib.instance.api.crateApiSimpleWeightPaintEnd();
+
+/// Shows the weights of `bone` on the active object as colours (blue 0, up to red
+/// 1), or the normal look with None.
+void setWeightView({BigInt? bone}) =>
+    RustLib.instance.api.crateApiSimpleSetWeightView(bone: bone);
+
 /// The names of the built-in shapes, in the order the tray shows them.
 List<String> shapeNames() => RustLib.instance.api.crateApiSimpleShapeNames();
 

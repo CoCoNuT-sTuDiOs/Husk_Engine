@@ -42,6 +42,7 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_normal: vec3<f32>,
     @location(1) world_position: vec3<f32>,
+    @location(2) bone_weight: f32,
 };
 
 @vertex
@@ -60,6 +61,11 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 out.clip_position = scene.view_proj * scene.model * skinned_position;
     out.world_normal = (scene.normal_matrix * skinned_normal).xyz;
     out.world_position = (scene.model * skinned_position).xyz;
+    // How much of the bone being shown (if any) moves this vertex: the sum of
+    // the weights of the slots that name that bone.
+    let shown = max(i32(round(scene.material.z)) - 1, 0);
+    let named = in.joint_indices == vec4<u32>(u32(shown));
+    out.bone_weight = dot(select(vec4<f32>(0.0), vec4<f32>(1.0), named), in.weights);
     return out;
 }
 
@@ -159,10 +165,39 @@ fn soft_clip(c: vec3<f32>) -> vec3<f32> {
     return select(shoulder, c, c <= vec3<f32>(knee));
 }
 
+// The weight colour ramp: blue at 0, then cyan, green, yellow, and red at 1.
+//
+// Ported from Blender (SPDX-FileCopyrightText: 2001-2002 NaN Holding BV. All
+// rights reserved., SPDX-License-Identifier: GPL-2.0-or-later):
+// `BKE_defvert_weight_to_rgb` in deform.cc, the ramp the weight paint overlay
+// uses by default.
+fn weight_to_rgb(weight: f32) -> vec3<f32> {
+    let blend = weight / 2.0 + 0.5;
+    if (weight <= 0.25) {
+        return vec3<f32>(0.0, blend * weight * 4.0, blend);
+    }
+    if (weight <= 0.5) {
+        return vec3<f32>(0.0, blend, blend * (1.0 - (weight - 0.25) * 4.0));
+    }
+    if (weight <= 0.75) {
+        return vec3<f32>(blend * (weight - 0.5) * 4.0, blend, 0.0);
+    }
+    return vec3<f32>(blend, blend * (1.0 - (weight - 0.75) * 4.0), 0.0);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let v = normalize(scene.camera_pos.xyz - in.world_position);
+
+    // The weight view: the weights of one bone as colours, shaded only enough
+    // (a light from the camera) to show the shape of the surface. As in
+    // Blender's weight overlay, the colour is never allowed to go fully black.
+    if (scene.material.z > 0.5) {
+        let shade = abs(dot(n, v)) * 0.9 + 0.1;
+        let ramp = weight_to_rgb(clamp(in.bone_weight, 0.0, 1.0));
+        return vec4<f32>(max(ramp, vec3<f32>(0.005)) * shade, 1.0);
+    }
 
     let albedo = scene.base_color.rgb;
     let roughness = clamp(scene.material.x, 0.05, 1.0);

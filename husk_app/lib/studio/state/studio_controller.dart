@@ -1,6 +1,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:husk_app/src/rust/api/simple.dart' as rust;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// What a click or drag in the viewport does.
 enum StudioTool {
@@ -33,6 +34,7 @@ enum ViewportQuality {
 
 class StudioController extends ChangeNotifier {
   StudioController() {
+    _loadHints();
     // A model that already has a rig is for posing; a bare one is for
     // building a skeleton.
     _tool = rust.boneCount() == BigInt.zero
@@ -47,9 +49,36 @@ class StudioController extends ChangeNotifier {
   bool _toolsCollapsed = false;
   bool _sidePanelCollapsed = false;
   bool _snapToSurface = false;
+
+  // The first-time hint cards the user has already closed.
+final Set<String> _seenHints = <String>{};
+  bool _hintsLoaded = false;
+
+  // The weight brush (Weight Paint mode). The starting values are Blender's.
+  double _brushWeight = 1.0;
+  double _brushStrength = 1.0;
+  double _brushRadius = 50;
+  String _brushBlend = 'mix';
+  bool _brushAccumulate = false;
  String? _projectPath;
   ViewportQuality _quality = ViewportQuality.normal;
  BigInt? get selectedBone => _selectedBone;
+
+
+  /// Tells the viewport to show the weights of the selected bone while the
+  /// active object is in Weight Paint mode, and its normal look otherwise.
+  void _syncWeightView() {
+    final showing = rust.activeMode() == 'weight_paint';
+    rust.setWeightView(bone: showing ? (_selectedBone ?? BigInt.zero) : null);
+  }
+
+  /// Every change is also a chance for the mode or the selected bone to have
+  /// changed, so the weight colours follow them.
+  @override
+  void notifyListeners() {
+    _syncWeightView();
+    super.notifyListeners();
+  }
 
   /// How many bones the skeleton has.
   int get boneCount => rust.boneCount().toInt();
@@ -148,6 +177,8 @@ class StudioController extends ChangeNotifier {
   /// object does not allow it.
   String? setMode(String name) {
     if (rust.setMode(name: name)) {
+      // Weight Paint always has a bone to show: the first one until you pick.
+      if (name == 'weight_paint') _selectedBone ??= BigInt.zero;
       notifyListeners();
       return null;
     }
@@ -165,7 +196,114 @@ class StudioController extends ChangeNotifier {
 
   /// Ctrl+Tab: between Object mode and Pose mode, as Blender does on an
   /// armature.
-  String? toggleObjectPose() => setMode(mode == 'pose' ? 'object' : 'pose');
+String? toggleObjectPose() => setMode(mode == 'pose' ? 'object' : 'pose');
+
+/// Whether the first-time hint card named [id] has been closed already.
+bool hintSeen(String id) => !_hintsLoaded || _seenHints.contains(id);
+
+/// Reads which hint cards were closed in earlier sessions.
+  Future<void> _loadHints() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _seenHints.addAll(prefs.getStringList('seen_hints') ?? const <String>[]);
+    } catch (error) {
+      debugPrint('Husk: the saved hints could not be read: $error');
+    }
+    _hintsLoaded = true;
+    notifyListeners();
+  }
+
+  Future<void> _saveHints() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('seen_hints', _seenHints.toList());
+    } catch (error) {
+      debugPrint('Husk: the hints could not be saved: $error');
+    }
+  }
+
+  /// Closes the hint card named [id], so it is not shown again.
+  void markHintSeen(String id) {
+if (!_seenHints.add(id)) return;
+    notifyListeners();
+    _saveHints();
+  }
+
+  /// The weight the brush paints, 0 to 1.
+  double get brushWeight => _brushWeight;
+
+  /// How strongly one touch paints, 0 to 1.
+  double get brushStrength => _brushStrength;
+
+  /// The brush radius in panel pixels: the size of the circle on screen.
+  double get brushRadius => _brushRadius;
+
+  /// How a touch combines with what the vertex has: 'mix', 'add' or 'subtract'.
+  String get brushBlend => _brushBlend;
+
+  /// When on, staying in one place keeps building up.
+  bool get brushAccumulate => _brushAccumulate;
+
+  void setBrushWeight(double value) {
+    _brushWeight = value.clamp(0.0, 1.0).toDouble();
+    notifyListeners();
+  }
+
+  void setBrushStrength(double value) {
+    _brushStrength = value.clamp(0.0, 1.0).toDouble();
+    notifyListeners();
+  }
+
+
+/// Makes the brush bigger (a factor above 1) or smaller (below 1), the way
+  /// the [ and ] keys do. Only in Weight Paint mode.
+  void nudgeBrushRadius(double factor) {
+    if (mode != 'weight_paint') return;
+    setBrushRadius((_brushRadius * factor).clamp(5.0, 200.0).toDouble());
+  }
+
+  void setBrushRadius(double value) {
+    _brushRadius = value.clamp(5.0, 300.0).toDouble();
+    notifyListeners();
+  }
+
+  void setBrushBlend(String blend) {
+    _brushBlend = blend;
+    notifyListeners();
+  }
+
+  void setBrushAccumulate(bool on) {
+    _brushAccumulate = on;
+    notifyListeners();
+  }
+
+  /// Starts a weight paint stroke (mouse down) on the selected bone, which is
+  /// bone 0 until one is picked, as the weight colours show. [erase] paints
+  /// this stroke as Subtract (Ctrl held), and [smooth] smooths the weights
+  /// instead (Shift held). Returns why not when it cannot start.
+  String? beginPaintStroke({required bool erase, bool smooth = false}) {
+    final (started, reason) = rust.weightPaintBegin(
+      bone: _selectedBone ?? BigInt.zero,
+            mode: (smooth || _brushBlend == 'smooth')
+          ? 'smooth'
+          : (erase ? 'subtract' : _brushBlend),
+      weight: _brushWeight,
+      strength: _brushStrength,
+      accumulate: _brushAccumulate,
+    );
+    return started ? null : reason;
+  }
+
+  /// One touch of the brush at render pixel ([x], [y]), reaching
+  /// [renderRadius] render pixels. Returns whether any vertex was painted.
+  bool paintStep(double x, double y, double renderRadius) =>
+      rust.weightPaintStep(x: x, y: y, radiusPixels: renderRadius);
+
+  /// Ends the stroke (mouse up).
+  void endPaintStroke() {
+    rust.weightPaintEnd();
+    notifyListeners();
+  }
 
   /// When on, dragging the end of a limb bends the joints above it.
   bool get ikMode => _ikMode;
@@ -203,7 +341,11 @@ class StudioController extends ChangeNotifier {
     // Bones are placed against the rest-pose mesh, so go back to rest first.
     rust.resetPose();
     final result = rust.placeBone(x: x, y: y, parent: _selectedBone);
-    if (result == null) return 'Bone placement: the click missed the mesh';
+        if (result == null) {
+      final (names, active) = objectList;
+      final name = active < names.length ? names[active] : 'none';
+      return 'The click missed $name. Bones go inside the active object: click the object in the Outliner first';
+    }
     final (index, _, _, _) = result;
     _selectedBone = index;
     notifyListeners();

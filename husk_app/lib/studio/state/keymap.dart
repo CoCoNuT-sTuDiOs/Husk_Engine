@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 /// KEEP lib/ui/shortcuts_manual.dart CURRENT: when a binding changes here,
 /// change its line in the manual in the same edit.
 enum HuskCommand {
+  brushSmaller,
+  brushBigger,
   save,
   saveAs,
   load,
@@ -154,6 +156,16 @@ KeyBinding(HuskCommand.deleteObject, [LogicalKeyboardKey.delete]),
   KeyBinding(HuskCommand.toggleToolPanel, [LogicalKeyboardKey.keyT]),
   KeyBinding(HuskCommand.toggleSidePanel, [LogicalKeyboardKey.keyN]),
   KeyBinding(HuskCommand.toggleMode, [LogicalKeyboardKey.tab], ctrl: true),
+  KeyBinding(
+    HuskCommand.brushSmaller,
+    [LogicalKeyboardKey.bracketLeft],
+    repeats: true,
+  ),
+  KeyBinding(
+    HuskCommand.brushBigger,
+    [LogicalKeyboardKey.bracketRight],
+    repeats: true,
+  ),
   KeyBinding(
     HuskCommand.toggleMaximize,
     [LogicalKeyboardKey.space],

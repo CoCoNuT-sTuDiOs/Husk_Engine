@@ -44,8 +44,15 @@ husk_core/src/rig/brush.rs
   Stroke: from the weight paint stroke code (do_wpaint_brush_draw,
     do_weight_paint_vertex_single, wpaint_blend, wpaint_clamp_monotonic).
   falloff: from BKE_brush_curve_strength (brush.cc), the Smooth preset.
-THIRD-PARTY LIBRARIES
+  Stroke::smooth: from do_wpaint_brush_blur and precompute_weight_values.
+  husk_core/src/rig/adjacency.rs
+  Adjacency::corners: the faces-around-a-vertex neighbourhood that
+    do_wpaint_brush_blur averages over.
+husk_core/src/render/shader.wgsl
+  weight_to_rgb: from BKE_defvert_weight_to_rgb (deform.cc).
 
+
+THIRD-PARTY LIBRARIES
 
 Husk is built with these libraries, each under its own licence (see each
 project):

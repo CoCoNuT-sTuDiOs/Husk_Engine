@@ -326,6 +326,16 @@ fn background_uniform(
     }
 }
 
+/// What the shader reads in `material.z` for one object: 0 for the normal
+/// look, or the number of the bone whose weights to show plus 1. Only the
+/// active object is ever shown this way.
+fn weight_view_flag(weight_view: Option<usize>, is_active: bool) -> f32 {
+    match weight_view {
+        Some(bone) if is_active && bone < MAX_BONES => bone as f32 + 1.0,
+        _ => 0.0,
+    }
+}
+
 /// One drawable thing in the scene: its own geometry, its own bone
 /// matrices, and its own placement and colour.
 struct RenderObject {
@@ -403,6 +413,9 @@ pub struct Renderer {
     /// Whether the background is a gradient (never in the shape tray's
     /// previews, which need a plain background to cut out).
     gradient_on: bool,
+    /// The bone whose weights the active object is drawn as colours of (blue
+    /// for 0 up to red for 1), or None for the normal look.
+    weight_view: Option<usize>,
 }
 
 const BYTES_PER_PIXEL: u32 = 4;
@@ -873,6 +886,7 @@ impl Renderer {
             background_bind_group,
             background_top: crate::scene::world::World::default().background_top,
             gradient_on: false,
+            weight_view: None,
         }
         }
 
@@ -1464,8 +1478,7 @@ impl Renderer {
         // whatever faces the camera is lit however you orbit.
         let shine = ((target - eye).normalize() + glam::Vec3::new(0.3, -0.5, 0.0)).normalize();
         let light_dir = [shine.x, shine.y, shine.z, 0.0];
-
-        for object in &self.objects {
+        for (index, object) in self.objects.iter().enumerate() {
             let scene_uniform = SceneUniform {
                 view_proj: view_proj.to_cols_array_2d(),
                  model: object.model.to_cols_array_2d(),
@@ -1475,7 +1488,12 @@ impl Renderer {
                 light_dir,
                 light_color: [1.0, 1.0, 1.0, 1.0],
                 base_color: object.base_color,
-                material: object.material,
+                    material: [
+                    object.material[0],
+                    object.material[1],
+                    weight_view_flag(self.weight_view, index == self.active_object),
+                    object.material[3],
+                ],
                 camera_pos: [eye.x, eye.y, eye.z, 1.0],
             };
                 self.queue.write_buffer(
@@ -1770,6 +1788,11 @@ pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeigh
         data.resize(MAX_BONES, glam::Mat4::IDENTITY.to_cols_array_2d());
         self.queue
             .write_buffer(&object.bone_matrices_buffer, 0, bytemuck::cast_slice(&data));
+    }
+    /// Shows the weights of `bone` on the active object as colours (blue 0, up
+    /// to red 1), or the normal look with None.
+    pub fn set_weight_view(&mut self, bone: Option<usize>) {
+        self.weight_view = bone;
     }
 
     pub fn set_bone_matrices(&self, matrices: &[glam::Mat4]) {
@@ -2380,6 +2403,14 @@ mod tests {
         assert_eq!(grid_line_brightness(0.05, 0.05, 0.08), 0.8);
         assert_eq!(grid_line_brightness(1.0, 1.0, 1.0), 0.1);
         assert_eq!(grid_line_brightness(0.53, 0.71, 0.91), 0.1);
+    }
+    #[test]
+    fn the_weight_view_flag_names_the_bone_only_for_the_active_object() {
+        assert_eq!(weight_view_flag(None, true), 0.0);
+        assert_eq!(weight_view_flag(Some(0), true), 1.0);
+        assert_eq!(weight_view_flag(Some(5), true), 6.0);
+        assert_eq!(weight_view_flag(Some(5), false), 0.0);
+        assert_eq!(weight_view_flag(Some(MAX_BONES), true), 0.0);
     }
 
     #[test]

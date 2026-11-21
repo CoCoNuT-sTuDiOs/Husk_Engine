@@ -439,7 +439,11 @@ void toggleSidePanel() => studio.toggleSidePanelCollapsed();
       case HuskCommand.toggleSidePanel:
         toggleSidePanel();
       case HuskCommand.toggleMode:
-        toggleMode(context);
+      toggleMode(context);
+      case HuskCommand.brushSmaller:
+        studio.nudgeBrushRadius(1 / 1.15);
+      case HuskCommand.brushBigger:
+        studio.nudgeBrushRadius(1.15);
       case HuskCommand.toolMoveObject:
          showMessage(context, studio.setTool(StudioTool.moveObject));
       case HuskCommand.toolRotateObject:

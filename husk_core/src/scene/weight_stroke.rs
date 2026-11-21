@@ -8,6 +8,7 @@
 //! to the object it began on: if another object becomes active, steps do nothing.
 
 use super::{mode, Project, RecoveringMutex, PROJECT};
+use crate::rig::adjacency::Adjacency;
 use crate::rig::brush::Stroke;
 use crate::rig::paint::BlendMode;
 use crate::rig::skinning::VertexWeights;
@@ -15,7 +16,9 @@ use crate::rig::skinning::VertexWeights;
 /// A stroke that has begun: the object it paints and the brush stroke itself.
 struct Active {
     object_id: u64,
-    stroke: Stroke,
+        stroke: Stroke,
+    /// The neighbour lists of the mesh, for a Smooth stroke (None for a paint stroke).
+    smooth: Option<Adjacency>,
 }
 
 static STROKE: RecoveringMutex<Option<Active>> = RecoveringMutex::new(None);
@@ -59,6 +62,7 @@ fn begin_in(
     scene.push_undo(None);
     Ok(Active {
         object_id,
+        smooth: None,
         stroke: Stroke::new(
             vertex_count,
             bone as u32,
@@ -86,9 +90,16 @@ fn step_in(
     }
     let mesh = object.mesh.clone()?;
     let weights = object.weights.as_mut()?;
-    let painted = active
-        .stroke
-        .apply(weights, &mesh.positions, centre, radius);
+        let painted = match &active.smooth {
+        Some(adjacency) => {
+            active
+                .stroke
+                .smooth(weights, &mesh.positions, adjacency, centre, radius)
+        }
+        None => active
+            .stroke
+            .apply(weights, &mesh.positions, centre, radius),
+    };
     if painted > 0 {
         upload(weights);
         scene.revision += 1;
@@ -96,8 +107,17 @@ fn step_in(
     Some(painted)
 }
 
+/// The neighbour lists of the active object's mesh, for a Smooth stroke.
+fn adjacency_of_active(project: &Project) -> Option<Adjacency> {
+    let scene = project.scenes.get(project.active_scene)?;
+    let mesh = scene.objects.get(scene.active_object)?.mesh.as_ref()?;
+    Some(Adjacency::build(&mesh.positions, &mesh.indices))
+}
+
 /// Starts a stroke on the active object that paints `bone` with `paint_weight`
 /// (0 to 1) at `strength` (0 to 1). Saves one undo step for the whole stroke.
+/// With `smooth` on, the stroke smooths the weights toward their neighbours
+/// instead of painting (`paint_weight` and `blend` are then not used).
 /// Returns why not when the stroke cannot start.
 pub fn begin(
     bone: usize,
@@ -105,10 +125,18 @@ pub fn begin(
     paint_weight: f32,
     strength: f32,
     accumulate: bool,
-) -> Result<(), String> {
+        smooth: bool,
+    ) -> Result<(), String> {
     let started = {
         let mut guard = PROJECT.lock().unwrap();
-        begin_in(&mut guard, bone, blend, paint_weight, strength, accumulate)?
+                let mut started = begin_in(&mut guard, bone, blend, paint_weight, strength, accumulate)?;
+        if smooth {
+            started.smooth = Some(
+                adjacency_of_active(&guard)
+                    .ok_or_else(|| String::from("The mesh has no faces to smooth over"))?,
+            );
+        }
+        started
     };
     *STROKE.lock().unwrap() = Some(started);
     Ok(())
@@ -263,6 +291,45 @@ mod tests {
             assert_eq!(vertex.joint_indices, on_bone_one().joint_indices);
             assert_eq!(vertex.weights, on_bone_one().weights);
         }
+    }
+
+    #[test]
+    fn a_smooth_stroke_pulls_a_vertex_toward_the_average_of_the_faces_around_it() {
+        // Four triangles around vertex 0, which has 0.9 of bone 2; the ring has none.
+        let mixed = |bone_two: f32| VertexWeights {
+            joint_indices: [2, 1, 0, 0],
+            weights: [bone_two, 1.0 - bone_two, 0.0, 0.0],
+        };
+        let mut object = character();
+        let mut mesh = MeshData::default();
+        mesh.positions = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ];
+        mesh.indices = vec![0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1];
+        object.mesh = Some(std::sync::Arc::new(mesh));
+        object.weights = Some(vec![
+            mixed(0.9),
+            mixed(0.0),
+            mixed(0.0),
+            mixed(0.0),
+            mixed(0.0),
+        ]);
+        let mut project = project_in_weight_paint(vec![object], 0);
+        let mut active = begin_in(&mut project, 2, BlendMode::Mix, 1.0, 1.0, false)
+            .ok()
+            .expect("the stroke begins");
+        active.smooth = adjacency_of_active(&project);
+        assert!(active.smooth.is_some());
+
+        let painted = step_in(&mut project, &mut active, [0.0; 3], 0.5, |_| {});
+        assert_eq!(painted, Some(1));
+        let weights = project.scenes[0].objects[0].weights.as_ref().unwrap();
+        assert!((weight_of(&weights[0], 2) - 0.3).abs() < 1e-5);
+        assert!(weight_of(&weights[1], 2).abs() < 1e-5);
     }
 
     #[test]

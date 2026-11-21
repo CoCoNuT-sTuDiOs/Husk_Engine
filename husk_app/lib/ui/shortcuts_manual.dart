@@ -94,13 +94,30 @@ const List<ShortcutSection> shortcutSections = [
       'Pick Object Mode, Pose Mode or Weight Paint, whichever the active object allows',
     ),
   ]),
+  ShortcutSection('Weight Paint', [
+    ShortcutEntry(
+      'Drag',
+      'Paint the weights of the selected joint under the brush circle',
+    ),
+    ShortcutEntry('Ctrl + drag', 'Take weight away instead (Subtract)'),
+    ShortcutEntry(
+      'Shift + drag',
+      'Smooth the weights toward their neighbours instead of painting (the Smooth button does the same)',
+    ),
+    ShortcutEntry('Click a joint dot', 'Choose which joint to paint'),
+    ShortcutEntry('[ and ]', 'Make the brush smaller or bigger'),
+    ShortcutEntry(
+      'Middle drag',
+      'Orbit the view (Shift + middle drag pans)',
+    ),
+  ]),
   ShortcutSection('Animation', [
     ShortcutEntry('Space', 'Play or pause the animation'),
   ]),
   ShortcutSection('In the viewport', [
     ShortcutEntry(
       'Click a joint dot',
-      'Select that joint (Pose Mode, or with the Place bones tool)',
+      'Select that joint (Pose Mode, Weight Paint, or with the Place bones tool)',
     ),
     ShortcutEntry(
       'Click an object',

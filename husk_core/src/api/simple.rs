@@ -726,7 +726,8 @@ pub fn set_mode(name: String) -> bool {
 
 /// Starts a weight paint stroke on the active object, which must be in Weight
 /// Paint mode with weights computed. It paints `bone` with `weight` (0 to 1) at
-/// `strength` (0 to 1) using the blend mode `mode` ("mix", "add" or "subtract");
+/// `strength` (0 to 1) using the blend mode `mode` ("mix", "add" or "subtract", or
+/// "smooth" to smooth the weights toward their neighbours instead of painting);
 /// with `accumulate` on, staying in one place builds up. The whole stroke is one
 /// undo step. Returns (true, "") or (false, why not).
 #[flutter_rust_bridge::frb(sync)]
@@ -737,11 +738,15 @@ pub fn weight_paint_begin(
     strength: f32,
     accumulate: bool,
 ) -> (bool, String) {
+        // "smooth" is the Smooth brush, which blends toward the average of the
+    // neighbours (always as Mix), so it has no blend mode of its own.
+    let smooth = mode == "smooth";
+    let mode = if smooth { String::from("mix") } else { mode };
     let Some(blend) = crate::rig::paint::BlendMode::from_name(&mode) else {
         return (false, String::from("Unknown blend mode"));
     };
-    match crate::scene::weight_stroke::begin(bone, blend, weight, strength, accumulate) {
-        Ok(()) => (true, String::new()),
+        match crate::scene::weight_stroke::begin(bone, blend, weight, strength, accumulate, smooth) {
+    Ok(()) => (true, String::new()),
         Err(reason) => (false, reason),
     }
 }
@@ -775,6 +780,13 @@ pub fn weight_paint_step(x: f64, y: f64, radius_pixels: f32) -> bool {
 #[flutter_rust_bridge::frb(sync)]
 pub fn weight_paint_end() {
     crate::scene::weight_stroke::end();
+}
+
+/// Shows the weights of `bone` on the active object as colours (blue 0, up to red
+/// 1), or the normal look with None.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_weight_view(bone: Option<usize>) {
+    crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_weight_view(bone));
 }
 
 /// The names of the built-in shapes, in the order the tray shows them.

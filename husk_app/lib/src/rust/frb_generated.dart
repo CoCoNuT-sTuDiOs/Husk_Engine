@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -309286409;
+  int get rustContentHash => 677400400;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -326,6 +326,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt boneIndex,
   });
 
+  void crateApiSimpleSetWeightView({BigInt? bone});
+
   bool crateApiSimpleSetWorldSettings({required WorldSettings settings});
 
   List<String> crateApiSimpleShapeNames();
@@ -355,6 +357,22 @@ abstract class RustLibApi extends BaseApi {
   (bool, BigInt?) crateApiSimpleUndoLastBone();
 
   void crateApiSimpleUnlockAllObjects();
+
+  (bool, String) crateApiSimpleWeightPaintBegin({
+    required BigInt bone,
+    required String mode,
+    required double weight,
+    required double strength,
+    required bool accumulate,
+  });
+
+  void crateApiSimpleWeightPaintEnd();
+
+  bool crateApiSimpleWeightPaintStep({
+    required double x,
+    required double y,
+    required double radiusPixels,
+  });
 
   WorldSettings crateApiSimpleWorldSettings();
 
@@ -2487,13 +2505,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  void crateApiSimpleSetWeightView({BigInt? bone}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_box_autoadd_usize(bone, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 87)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleSetWeightViewConstMeta,
+        argValues: [bone],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleSetWeightViewConstMeta =>
+      const TaskConstMeta(debugName: "set_weight_view", argNames: ["bone"]);
+
+  @override
   bool crateApiSimpleSetWorldSettings({required WorldSettings settings}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_box_autoadd_world_settings(settings, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 87)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 88)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -2518,7 +2559,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 88)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 89)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_list_String,
@@ -2548,7 +2589,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 89,
+            funcId: 90,
             port: port_,
           );
         },
@@ -2579,7 +2620,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_f_64(x, serializer);
           sse_encode_f_64(y, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 90)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 91)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -2611,7 +2652,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_64(x, serializer);
           sse_encode_f_64(y, serializer);
           sse_encode_bool(skipActive, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 91)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 92)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_box_autoadd_surface_spot,
@@ -2636,7 +2677,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 92)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 93)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -2658,7 +2699,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 93)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 94)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_f_32,
@@ -2680,7 +2721,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 94)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 95)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -2702,7 +2743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 95)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 96)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_record_bool_opt_box_autoadd_usize,
@@ -2724,7 +2765,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 96)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 97)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -2741,12 +2782,110 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "unlock_all_objects", argNames: []);
 
   @override
+  (bool, String) crateApiSimpleWeightPaintBegin({
+    required BigInt bone,
+    required String mode,
+    required double weight,
+    required double strength,
+    required bool accumulate,
+  }) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_usize(bone, serializer);
+          sse_encode_String(mode, serializer);
+          sse_encode_f_32(weight, serializer);
+          sse_encode_f_32(strength, serializer);
+          sse_encode_bool(accumulate, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 98)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_record_bool_string,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleWeightPaintBeginConstMeta,
+        argValues: [bone, mode, weight, strength, accumulate],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleWeightPaintBeginConstMeta =>
+      const TaskConstMeta(
+        debugName: "weight_paint_begin",
+        argNames: ["bone", "mode", "weight", "strength", "accumulate"],
+      );
+
+  @override
+  void crateApiSimpleWeightPaintEnd() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 99)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleWeightPaintEndConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleWeightPaintEndConstMeta =>
+      const TaskConstMeta(debugName: "weight_paint_end", argNames: []);
+
+  @override
+  bool crateApiSimpleWeightPaintStep({
+    required double x,
+    required double y,
+    required double radiusPixels,
+  }) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_f_64(x, serializer);
+          sse_encode_f_64(y, serializer);
+          sse_encode_f_32(radiusPixels, serializer);
+          return pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 100,
+          )!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleWeightPaintStepConstMeta,
+        argValues: [x, y, radiusPixels],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleWeightPaintStepConstMeta =>
+      const TaskConstMeta(
+        debugName: "weight_paint_step",
+        argNames: ["x", "y", "radiusPixels"],
+      );
+
+  @override
   WorldSettings crateApiSimpleWorldSettings() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 97)!;
+          return pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 101,
+          )!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_world_settings,
@@ -2769,7 +2908,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_f_64(factor, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 98)!;
+          return pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 102,
+          )!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
