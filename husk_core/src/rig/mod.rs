@@ -60,6 +60,7 @@ impl Skeleton {
 pub mod geodesic;
 pub mod adjacency;
 pub mod brush;
+pub mod dual_quat;
 pub mod paint;
 pub mod skinning;
 pub mod voxel;

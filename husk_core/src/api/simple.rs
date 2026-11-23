@@ -789,6 +789,26 @@ pub fn set_weight_view(bone: Option<usize>) {
     crate::platform::ffi::with_active_renderer_mut(|renderer| renderer.set_weight_view(bone));
 }
 
+/// Whether the active object's skin is blended with dual quaternions (Preserve
+/// volume): a bent limb keeps its thickness instead of pinching at the joint.
+#[flutter_rust_bridge::frb(sync)]
+pub fn preserve_volume() -> bool {
+    crate::scene::active_preserve_volume()
+}
+
+/// Turns Preserve volume on or off for the active object, as one undo step.
+/// Returns whether anything changed.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_preserve_volume(enabled: bool) -> bool {
+    let Some(index) = crate::scene::set_active_preserve_volume(enabled) else {
+        return false;
+    };
+    crate::platform::ffi::with_active_renderer_mut(|renderer| {
+        renderer.set_object_preserve_volume(index, enabled)
+    });
+    true
+}
+
 /// The names of the built-in shapes, in the order the tray shows them.
 #[flutter_rust_bridge::frb(sync)]
 pub fn shape_names() -> Vec<String> {

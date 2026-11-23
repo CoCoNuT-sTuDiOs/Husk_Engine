@@ -48,7 +48,15 @@ husk_core/src/rig/brush.rs
   husk_core/src/rig/adjacency.rs
   Adjacency::corners: the faces-around-a-vertex neighbourhood that
     do_wpaint_brush_blur averages over.
+husk_core/src/rig/dual_quat.rs
+  DualQuat::from_matrix: from mat4_to_dquat. DualQuat::blend: from
+    add_weighted_dq_dq and normalize_dq, with the total weight rule of
+    armature_deform. DualQuat::transform_point: from mul_v3m3_dq (BLI
+    math_rotation). The dual quaternion routines there are from the University
+    of Dublin, Trinity College (Zlib licence, Copyright 2006-2007 University of
+    Dublin, Trinity College, All Rights Reserved).
 husk_core/src/render/shader.wgsl
+  dual_quat_skin: the same blend as dual_quat.rs, on the GPU.
   weight_to_rgb: from BKE_defvert_weight_to_rgb (deform.cc).
 
 

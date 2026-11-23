@@ -47,7 +47,24 @@ class ViewportToolStrip extends StatelessWidget {
         return [
           const Text('IK drag', style: HuskText.readout),
           const SizedBox(width: 6),
-          Switch(value: studio.ikMode, onChanged: (_) => studio.toggleIk()),
+                  Switch(value: studio.ikMode, onChanged: (_) => studio.toggleIk()),
+          const SizedBox(width: 16),
+          Tooltip(
+            message:
+                'Preserve volume: a bent limb keeps its thickness instead of pinching at the joint',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Preserve volume', style: HuskText.readout),
+                const SizedBox(width: 6),
+                Switch(
+                  value: studio.preserveVolume,
+                  onChanged: studio.setPreserveVolume,
+                ),
+              ],
+            ),
+          ),
+
         ];
       case StudioTool.placeBones:
         final parent = studio.selectedBone;

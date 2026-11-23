@@ -64,8 +64,12 @@ pub struct Object {
     /// viewport, moved, rotated, scaled or deleted. It still draws and
     /// still plays its animation.
         pub locked: bool,
+        /// Whether the skin of this object is blended with dual quaternions
+    /// instead of matrices (Blender's Preserve Volume): a bent limb keeps its
+    /// thickness instead of pinching at the joint. Off by default, as in Blender.
+    pub preserve_volume: bool,
     /// The object's geometry, shared with the renderer, which keeps its own
-    /// handle to draw from. The scene's handle keeps the mesh alive after the
+        /// handle to draw from. The scene's handle keeps the mesh alive after the
     /// renderer lets go of it, which is what undoing a delete needs. None for
     /// an object with no geometry, and until a mesh is shared.
     pub mesh: Option<std::sync::Arc<crate::geometry::mesh::MeshData>>,
@@ -239,7 +243,9 @@ pub struct Snapshot {
 
 /// What the renderer needs to draw one object again from scratch.
 pub struct DrawState {
-    pub mesh: Option<std::sync::Arc<crate::geometry::mesh::MeshData>>,
+    /// Whether the object's skin is blended with dual quaternions.
+    pub preserve_volume: bool,
+   pub mesh: Option<std::sync::Arc<crate::geometry::mesh::MeshData>>,
     pub model: glam::Mat4,
     pub material: material::Material,
     pub weights: Option<Vec<VertexWeights>>,
@@ -393,6 +399,7 @@ impl Scene {
                     model,
                     material: object.material,
                     weights: object.weights.clone(),
+                    preserve_volume: object.preserve_volume,
                     skinning,
                 }
             })
@@ -1232,6 +1239,33 @@ pub fn active_locked() -> bool {
 }
 
 
+
+/// Whether the active object's skin is blended with dual quaternions.
+pub fn active_preserve_volume() -> bool {
+    let guard = PROJECT.lock().unwrap();
+    guard.scenes.get(guard.active_scene).map_or(false, |scene| {
+        scene
+            .objects
+            .get(scene.active_object)
+            .map_or(false, |object| object.preserve_volume)
+    })
+}
+
+/// Switches dual quaternion skinning on or off for the active object, as one
+/// undo step. Returns the index of the object that changed, or None, changing
+/// nothing, when there is no such object or it already has this setting.
+pub fn set_active_preserve_volume(enabled: bool) -> Option<usize> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    let index = scene.active_object;
+    if scene.objects.get(index)?.preserve_volume == enabled {
+        return None;
+    }
+    scene.push_undo(None);
+    scene.objects[index].preserve_volume = enabled;
+    Some(index)
+}
 
 /// Whether the active object is a rig.
 pub fn active_is_rig() -> bool {
@@ -2175,6 +2209,18 @@ fn a_duplicate_is_a_new_object_beside_the_original_and_keeps_its_parent() {
         let next = scene.push_object(Object::default());
         assert!(scene.objects[next].id > second);
         assert_eq!(scene.index_of_id(second), Some(1));
+    }
+
+    #[test]
+        fn preserve_volume_starts_off_and_undo_brings_back_what_it_was() {
+        let mut scene = scene_with(1, 0);
+        assert!(!scene.objects[0].preserve_volume);
+        scene.push_undo(None);
+        scene.objects[0].preserve_volume = true;
+        assert!(scene.undo());
+        assert!(!scene.objects[0].preserve_volume);
+        assert!(scene.redo());
+        assert!(scene.objects[0].preserve_volume);
     }
 
     #[test]

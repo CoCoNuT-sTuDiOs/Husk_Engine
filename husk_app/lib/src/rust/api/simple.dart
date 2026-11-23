@@ -258,7 +258,8 @@ bool setMode({required String name}) =>
 
 /// Starts a weight paint stroke on the active object, which must be in Weight
 /// Paint mode with weights computed. It paints `bone` with `weight` (0 to 1) at
-/// `strength` (0 to 1) using the blend mode `mode` ("mix", "add" or "subtract");
+/// `strength` (0 to 1) using the blend mode `mode` ("mix", "add" or "subtract", or
+/// "smooth" to smooth the weights toward their neighbours instead of painting);
 /// with `accumulate` on, staying in one place builds up. The whole stroke is one
 /// undo step. Returns (true, "") or (false, why not).
 (bool, String) weightPaintBegin({
@@ -295,6 +296,15 @@ void weightPaintEnd() => RustLib.instance.api.crateApiSimpleWeightPaintEnd();
 /// 1), or the normal look with None.
 void setWeightView({BigInt? bone}) =>
     RustLib.instance.api.crateApiSimpleSetWeightView(bone: bone);
+
+/// Whether the active object's skin is blended with dual quaternions (Preserve
+/// volume): a bent limb keeps its thickness instead of pinching at the joint.
+bool preserveVolume() => RustLib.instance.api.crateApiSimplePreserveVolume();
+
+/// Turns Preserve volume on or off for the active object, as one undo step.
+/// Returns whether anything changed.
+bool setPreserveVolume({required bool enabled}) =>
+    RustLib.instance.api.crateApiSimpleSetPreserveVolume(enabled: enabled);
 
 /// The names of the built-in shapes, in the order the tray shows them.
 List<String> shapeNames() => RustLib.instance.api.crateApiSimpleShapeNames();

@@ -305,6 +305,14 @@ if (!_seenHints.add(id)) return;
     notifyListeners();
   }
 
+  /// Whether the active object's skin blends dual quaternions (Preserve
+  /// volume). The Rust core owns it; this only reads it.
+  bool get preserveVolume => rust.preserveVolume();
+
+  void setPreserveVolume(bool enabled) {
+    if (rust.setPreserveVolume(enabled: enabled)) notifyListeners();
+  }
+
   /// When on, dragging the end of a limb bends the joints above it.
   bool get ikMode => _ikMode;
 

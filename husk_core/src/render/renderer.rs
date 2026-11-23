@@ -336,6 +336,19 @@ fn weight_view_flag(weight_view: Option<usize>, is_active: bool) -> f32 {
     }
 }
 
+/// What the shader reads for dual quaternion skinning: for every bone a real
+/// quaternion and a dual quaternion (x, y, z, w each), made from the same
+/// skinning matrices and padded with "no movement" up to `MAX_BONES`.
+fn dual_quat_data(matrices: &[glam::Mat4]) -> Vec<[[f32; 4]; 2]> {
+    let mut data: Vec<[[f32; 4]; 2]> = matrices
+        .iter()
+        .take(MAX_BONES)
+        .map(|matrix| crate::rig::dual_quat::DualQuat::from_matrix(*matrix).to_gpu())
+        .collect();
+    data.resize(MAX_BONES, crate::rig::dual_quat::DualQuat::IDENTITY.to_gpu());
+    data
+}
+
 /// One drawable thing in the scene: its own geometry, its own bone
 /// matrices, and its own placement and colour.
 struct RenderObject {
@@ -345,6 +358,10 @@ struct RenderObject {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     bone_matrices_buffer: wgpu::Buffer,
+    /// The same bones as dual quaternions, for Preserve volume.
+    bone_dual_quats_buffer: wgpu::Buffer,
+    /// Whether the skin is blended with dual quaternions instead of matrices.
+    preserve_volume: bool,
     bone_bind_group: wgpu::BindGroup,
     mesh_data: std::sync::Arc<crate::geometry::mesh::MeshData>,
     model: glam::Mat4,
@@ -532,7 +549,17 @@ impl Renderer {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("husk_bone_bind_group_layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -927,12 +954,25 @@ impl Renderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
+        let identity_dual_quats: Vec<[[f32; 4]; 2]> =
+            vec![crate::rig::dual_quat::DualQuat::IDENTITY.to_gpu(); MAX_BONES];
+
+        let bone_dual_quats_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("husk_bone_dual_quats_buffer"),
+            contents: bytemuck::cast_slice(&identity_dual_quats),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
         let bone_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("husk_bone_bind_group"),
+        label: Some("husk_bone_bind_group"),
             layout: bone_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: bone_matrices_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: bone_dual_quats_buffer.as_entire_binding(),
             }],
         });
 
@@ -971,7 +1011,9 @@ impl Renderer {
             uniform_buffer,
             bind_group,
             bone_matrices_buffer,
-            bone_bind_group,
+             bone_bind_group,
+            bone_dual_quats_buffer,
+            preserve_volume: false,
             mesh_data: mesh,
             model,
             base_color,
@@ -979,11 +1021,6 @@ impl Renderer {
         }
         }
 
-    /// Draws one mesh on its own, fitted to the frame, at `size` x `size`
-    /// pixels, and returns the RGBA pixels with the background made
-    /// transparent. The shape tray uses it for its previews. It builds a
-    /// throwaway renderer (its own GPU device), so call it off the UI
-    /// thread and never once per frame.
     pub fn render_preview(mesh: crate::geometry::mesh::MeshData, size: u32) -> Vec<u8> {
         // A light neutral grey-blue, so the shape reads on the dark panel.
         const PREVIEW_COLOR: [f32; 4] = [0.70, 0.72, 0.76, 1.0];
@@ -1073,11 +1110,6 @@ impl Renderer {
                 )
     }
 
-    /// Adds a scene camera, drawn as `mesh` (a small camera shape), placed
-    /// where the viewport camera is and looking the way it looks, as
-    /// Blender's "camera to view" does. The shape is sized to the viewing
-    /// distance so it stays visible. Returns its index, its placement matrix
-    /// and its colour. The active object does not change.
     pub fn add_camera_at_view(
         &mut self,
         mesh: crate::geometry::mesh::MeshData,
@@ -1492,8 +1524,8 @@ impl Renderer {
                     object.material[0],
                     object.material[1],
                     weight_view_flag(self.weight_view, index == self.active_object),
-                    object.material[3],
-                ],
+                    if object.preserve_volume { 1.0 } else { 0.0 },
+                    ],
                 camera_pos: [eye.x, eye.y, eye.z, 1.0],
             };
                 self.queue.write_buffer(
@@ -1768,6 +1800,7 @@ pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeigh
                 [colour[0], colour[1], colour[2], 1.0],
             );
             object.material = state.material.shader_values();
+            object.preserve_volume = state.preserve_volume;
             self.objects.push(object);
             let index = self.objects.len() - 1;
             if let Some(weights) = &state.weights {
@@ -1787,8 +1820,27 @@ pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeigh
         let mut data: Vec<[[f32; 4]; 4]> = matrices.iter().map(|m| m.to_cols_array_2d()).collect();
         data.resize(MAX_BONES, glam::Mat4::IDENTITY.to_cols_array_2d());
         self.queue
-            .write_buffer(&object.bone_matrices_buffer, 0, bytemuck::cast_slice(&data));
+        .write_buffer(&object.bone_matrices_buffer, 0, bytemuck::cast_slice(&data));
+        self.queue.write_buffer(
+            &object.bone_dual_quats_buffer,
+            0,
+            bytemuck::cast_slice(&dual_quat_data(matrices)),
+        );
     }
+
+    /// Switches dual quaternion skinning on or off for the object at `index`.
+    /// The scene holds the real setting; this is its GPU-side copy. False,
+    /// changing nothing, if there is no such object.
+    pub fn set_object_preserve_volume(&mut self, index: usize, enabled: bool) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) => {
+                object.preserve_volume = enabled;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Shows the weights of `bone` on the active object as colours (blue 0, up
     /// to red 1), or the normal look with None.
     pub fn set_weight_view(&mut self, bone: Option<usize>) {
@@ -1796,6 +1848,11 @@ pub fn update_vertex_weights(&self, weights: &[crate::rig::skinning::VertexWeigh
     }
 
     pub fn set_bone_matrices(&self, matrices: &[glam::Mat4]) {
+        self.queue.write_buffer(
+            &self.objects[self.active_object].bone_dual_quats_buffer,
+            0,
+            bytemuck::cast_slice(&dual_quat_data(matrices)),
+        );
     let mut data: Vec<[[f32; 4]; 4]> = matrices.iter().map(|m| m.to_cols_array_2d()).collect();
         data.resize(MAX_BONES, glam::Mat4::IDENTITY.to_cols_array_2d());
         self.queue.write_buffer(

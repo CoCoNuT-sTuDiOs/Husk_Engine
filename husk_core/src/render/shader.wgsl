@@ -14,6 +14,11 @@ var<uniform> scene: SceneUniform;
 @group(1) @binding(0)
 var<storage, read> bone_matrices: array<mat4x4<f32>>;
 
+// The same bones as dual quaternions, for Preserve volume: for every bone a real
+// quaternion, then a dual quaternion, each as (x, y, z, w).
+@group(1) @binding(1)
+var<storage, read> bone_dual_quats: array<vec4<f32>>;
+
 struct GpuLight {
     position: vec4<f32>,
     direction: vec4<f32>,
@@ -45,6 +50,69 @@ struct VertexOutput {
     @location(2) bone_weight: f32,
 };
 
+
+struct DualQuatSkin {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+};
+
+// Turns `v` by the unit quaternion `q`, held as (x, y, z, w).
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+// Dual quaternion skinning: the bones' dual quaternions are blended by weight
+// instead of their matrices, so a bent or twisted limb keeps its thickness.
+//
+// Ported from Blender (SPDX-FileCopyrightText: 2001-2002 NaN Holding BV. All
+// rights reserved., SPDX-License-Identifier: GPL-2.0-or-later): `add_weighted_dq_dq`,
+// `normalize_dq` and `mul_v3m3_dq` in BLI math_rotation, and the rule of
+// `armature_deform` that a vertex with a total weight under 0.0001 is not moved.
+// The same blend is in dual_quat.rs, which has the tests.
+fn dual_quat_skin(
+    joints: vec4<u32>,
+    weights: vec4<f32>,
+    position: vec3<f32>,
+    normal: vec3<f32>,
+) -> DualQuatSkin {
+    var real = vec4<f32>(0.0);
+    var dual = vec4<f32>(0.0);
+    var total = 0.0;
+    for (var slot = 0u; slot < 4u; slot = slot + 1u) {
+        let weight = weights[slot];
+        if (weight <= 0.0) {
+            continue;
+        }
+        let bone = joints[slot];
+        var r = bone_dual_quats[bone * 2u];
+        var d = bone_dual_quats[bone * 2u + 1u];
+        // Turn a quaternion that points away from what is added so far round.
+        if (dot(r, real) < 0.0) {
+            r = -r;
+            d = -d;
+        }
+        real = real + r * weight;
+        dual = dual + d * weight;
+        total = total + weight;
+    }
+
+    var skin: DualQuatSkin;
+    skin.position = position;
+    skin.normal = normal;
+    let length_squared = dot(real, real);
+    if (total < 0.0001 || length_squared < 1e-12) {
+        return skin;
+    }
+    let rotation = real / sqrt(length_squared);
+    let translation = 2.0
+        * (dual.xyz * real.w - real.xyz * dual.w - cross(dual.xyz, real.xyz))
+        / length_squared;
+    skin.position = quat_rotate(rotation, position) + translation;
+    skin.normal = quat_rotate(rotation, normal);
+    return skin;
+}
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -55,8 +123,16 @@ fn vs_main(in: VertexInput) -> VertexOutput {
         bone_matrices[in.joint_indices.z] * in.weights.z +
         bone_matrices[in.joint_indices.w] * in.weights.w;
 
-    let skinned_position = skin_matrix * vec4<f32>(in.position, 1.0);
-    let skinned_normal = skin_matrix * vec4<f32>(in.normal, 0.0);
+    var skinned_position = skin_matrix * vec4<f32>(in.position, 1.0);
+        var skinned_normal = skin_matrix * vec4<f32>(in.normal, 0.0);
+
+    // With Preserve volume on, the bones' dual quaternions are blended instead
+    // of their matrices.
+    if (scene.material.w > 0.5) {
+        let skin = dual_quat_skin(in.joint_indices, in.weights, in.position, in.normal);
+        skinned_position = vec4<f32>(skin.position, 1.0);
+        skinned_normal = vec4<f32>(skin.normal, 0.0);
+    }
 
 out.clip_position = scene.view_proj * scene.model * skinned_position;
     out.world_normal = (scene.normal_matrix * skinned_normal).xyz;
