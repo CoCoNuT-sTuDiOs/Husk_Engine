@@ -29,6 +29,8 @@ pub enum ObjectMode {
     /// Placing, turning and scaling objects. Every object allows it.
     #[default]
     Object,
+    /// Editing the skeleton itself: placing, moving and deleting bones.
+    Edit,
     /// Posing the bones of a rig, or of a mesh that carries a skeleton.
     Pose,
     /// Painting which bone moves which part of a mesh.
@@ -37,8 +39,9 @@ pub enum ObjectMode {
 
 impl ObjectMode {
     /// Every mode, in the order the mode menu lists them.
-    pub const ALL: [ObjectMode; 3] = [
+    pub const ALL: [ObjectMode; 4] = [
         ObjectMode::Object,
+        ObjectMode::Edit,
         ObjectMode::Pose,
         ObjectMode::WeightPaint,
     ];
@@ -49,6 +52,7 @@ impl ObjectMode {
             ObjectMode::Object => "object",
             ObjectMode::Pose => "pose",
             ObjectMode::WeightPaint => "weight_paint",
+            ObjectMode::Edit => "edit",
         }
     }
 
@@ -66,11 +70,12 @@ pub fn mode_compat_test(object: &Object, mode: ObjectMode) -> bool {
     let has_bones = !object.skeleton.bones.is_empty();
     match object.kind {
         ObjectKind::Mesh => match mode {
+            ObjectMode::Edit => object.mesh.is_some(),
             ObjectMode::Pose => has_bones,
             ObjectMode::WeightPaint => has_bones && object.mesh.is_some(),
             ObjectMode::Object => true,
         },
-        ObjectKind::Rig => mode == ObjectMode::Pose,
+        ObjectKind::Rig => matches!(mode, ObjectMode::Edit | ObjectMode::Pose),
         ObjectKind::Camera(_) | ObjectKind::Light(_) => false,
     }
 }
@@ -204,6 +209,21 @@ mod tests {
     }
 
     #[test]
+        fn edit_needs_a_rig_or_a_mesh_with_geometry() {
+        // A rig is edited even with no bones yet: the first bone is placed there.
+        assert!(mode_compat_test(&rig(), ObjectMode::Edit));
+        assert!(mode_compat_test(&character(), ObjectMode::Edit));
+        // A mesh with geometry and no bones can be edited too, to place its first bone.
+        let mut bare = character();
+        bare.skeleton = Default::default();
+        assert!(mode_compat_test(&bare, ObjectMode::Edit));
+        // The empty starting object has no geometry to place bones in.
+        assert!(!mode_compat_test(&plain(), ObjectMode::Edit));
+        assert!(!mode_compat_test(&camera(), ObjectMode::Edit));
+        assert!(!mode_compat_test(&lamp(), ObjectMode::Edit));
+    }
+
+    #[test]
     fn pose_needs_a_rig_or_a_skeleton() {
         assert!(!mode_compat_test(&plain(), ObjectMode::Pose));
         assert!(mode_compat_test(&rig(), ObjectMode::Pose));
@@ -234,12 +254,17 @@ mod tests {
         project.scenes[0].active_object = 1;
         assert_eq!(
             available(&project),
-            vec![ObjectMode::Object, ObjectMode::Pose]
+            vec![ObjectMode::Object, ObjectMode::Edit, ObjectMode::Pose]
         );
         project.scenes[0].active_object = 2;
         assert_eq!(
             available(&project),
-            vec![ObjectMode::Object, ObjectMode::Pose, ObjectMode::WeightPaint]
+        vec![
+            ObjectMode::Object,
+            ObjectMode::Edit,
+            ObjectMode::Pose,
+            ObjectMode::WeightPaint
+            ]   
         );
     }
 

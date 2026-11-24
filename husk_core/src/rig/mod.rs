@@ -63,4 +63,5 @@ pub mod brush;
 pub mod dual_quat;
 pub mod paint;
 pub mod skinning;
+pub mod bone_edit;
 pub mod voxel;

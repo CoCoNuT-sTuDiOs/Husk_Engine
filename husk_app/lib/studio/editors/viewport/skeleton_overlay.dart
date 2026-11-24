@@ -32,7 +32,10 @@ class SkeletonOverlayPainter extends CustomPainter {
       ..color = HuskColors.blue
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
-    final dotFill = Paint()..color = HuskColors.orange;
+      final dotFill = Paint()..color = HuskColors.orange;
+    final boneFill = Paint()..color = HuskColors.blue.withValues(alpha: 0.35);
+    final selectedBoneFill = Paint()
+      ..color = HuskColors.blue.withValues(alpha: 0.7);
     final rootFill = Paint()..color = HuskColors.success;
     final dotOutline = Paint()
       ..color = HuskColors.canvas
@@ -53,7 +56,14 @@ class SkeletonOverlayPainter extends CustomPainter {
       if (parentIndex >= positions.length) continue;
       final parentJoint = positions[parentIndex];
       if (parentJoint == null) continue;
-      canvas.drawLine(toCanvas(parentJoint), toCanvas(joint), linePaint);
+      final selected = i == selectedIndex;
+      _drawBone(
+        canvas,
+        toCanvas(parentJoint),
+        toCanvas(joint),
+        selected ? selectedBoneFill : boneFill,
+        selected ? selectedRing : linePaint,
+      );
     }
 
     for (var i = 0; i < positions.length; i++) {
@@ -72,4 +82,35 @@ class SkeletonOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SkeletonOverlayPainter oldDelegate) => true;
+
+  /// One bone as Blender draws it by default (octahedral): a long diamond from
+  /// the [head] to the [tail], widest 10 percent of the way out from the head,
+  /// where it is 10 percent of the bone's length to each side. A bone too short
+  /// on screen to show a shape is a plain line.
+  void _drawBone(
+    Canvas canvas,
+    Offset head,
+    Offset tail,
+    Paint fill,
+    Paint outline,
+  ) {
+    final along = tail - head;
+    final length = along.distance;
+    if (length < 4) {
+      canvas.drawLine(head, tail, outline);
+      return;
+    }
+    final direction = along / length;
+    final side = Offset(-direction.dy, direction.dx);
+    final waist = head + along * 0.1;
+    final half = length * 0.1;
+    final path = Path()
+      ..moveTo(head.dx, head.dy)
+      ..lineTo(waist.dx + side.dx * half, waist.dy + side.dy * half)
+      ..lineTo(tail.dx, tail.dy)
+      ..lineTo(waist.dx - side.dx * half, waist.dy - side.dy * half)
+      ..close();
+    canvas.drawPath(path, fill);
+    canvas.drawPath(path, outline);
+  }
 }

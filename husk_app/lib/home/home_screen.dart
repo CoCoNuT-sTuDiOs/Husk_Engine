@@ -751,17 +751,11 @@ class _EmptyRow extends StatelessWidget {
 
 /// Draws a dashed rounded-rectangle outline.
 class _DashedBorderPainter extends CustomPainter {
-  const _DashedBorderPainter({
-    required this.color,
-    this.radius = 12,
-    this.dash = 8,
-    this.gap = 6,
-  });
-
+  const _DashedBorderPainter({required this.color});
   final Color color;
-  final double radius;
-  final double dash;
-  final double gap;
+    final double radius = 12;
+  final double dash = 8;
+  final double gap = 6;
 
   @override
   void paint(Canvas canvas, Size size) {

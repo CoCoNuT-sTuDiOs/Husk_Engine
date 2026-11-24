@@ -151,6 +151,27 @@ List<(double, double)?> jointScreenPositions() =>
 
 List<BigInt?> boneParents() => RustLib.instance.api.crateApiSimpleBoneParents();
 
+/// Deletes bone `bone` of the active object as one undo step. The weights, the
+/// pose and every key are renumbered with it, and parts that followed the bone
+/// follow its parent instead. False, changing nothing, for an unknown bone or a
+/// locked object.
+bool deleteBone({required BigInt bone}) =>
+    RustLib.instance.api.crateApiSimpleDeleteBone(bone: bone);
+
+/// Drags joint `bone` onto the cursor at screen pixel (x, y), on a plane
+/// through the joint that faces the camera, and leaves it there at rest.
+/// A drag is one undo step. False, changing nothing, for an unknown bone, a
+/// locked object, or when there is no active renderer.
+bool moveJointToCursor({
+  required BigInt bone,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiSimpleMoveJointToCursor(
+  bone: bone,
+  x: x,
+  y: y,
+);
+
 /// Clears the current skeleton and any computed weights, so you can
 /// start placing bones over from a clean state.
 void resetSkeleton() => RustLib.instance.api.crateApiSimpleResetSkeleton();

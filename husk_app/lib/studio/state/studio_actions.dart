@@ -247,7 +247,15 @@ void addRig(BuildContext context) => showMessage(context, studio.addRig());
 
   void addLight(BuildContext context, String kind) =>
       showMessage(context, studio.addLight(kind));
-  void deleteObject(BuildContext context) =>
+void deleteObject(BuildContext context) {
+    if (studio.mode == 'edit') {
+      showMessage(context, studio.deleteSelectedBone());
+      return;
+    }
+    deleteActiveObject(context);
+  }
+
+  void deleteActiveObject(BuildContext context) =>
       showMessage(context, studio.removeActiveObject());
 
   void deleteObjectAt(BuildContext context, int index) =>
@@ -266,8 +274,11 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
 
   /// Ctrl+Tab: between Object mode and Pose mode.
   void toggleMode(BuildContext context) =>
-      showMessage(context, studio.toggleObjectPose());
+    showMessage(context, studio.toggleObjectPose());
 
+  /// Tab: between Object mode and Edit mode.
+  void toggleEditMode(BuildContext context) =>
+      showMessage(context, studio.toggleObjectEdit());
   void setLocked(BuildContext context, int index, bool locked) =>
       showMessage(context, studio.setLocked(index, locked));
 
@@ -439,7 +450,9 @@ void toggleSidePanel() => studio.toggleSidePanelCollapsed();
       case HuskCommand.toggleSidePanel:
         toggleSidePanel();
       case HuskCommand.toggleMode:
-      toggleMode(context);
+    toggleMode(context);
+      case HuskCommand.toggleEditMode:
+        toggleEditMode(context);
       case HuskCommand.brushSmaller:
         studio.nudgeBrushRadius(1 / 1.15);
       case HuskCommand.brushBigger:

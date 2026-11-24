@@ -34,6 +34,15 @@ class ViewportToolStrip extends StatelessWidget {
         if (studio.mode == 'weight_paint') {
           return const <Widget>[];
     }
+if (studio.mode == 'edit' && studio.tool == StudioTool.select) {
+      return [
+        IconAction(
+          icon: PhosphorIcon(PhosphorIconsRegular.trash),
+          tooltip: 'Delete the selected bone (Delete)',
+          onPressed: () => actions.deleteObject(context),
+        ),
+      ];
+    }
     if (studio.tool == StudioTool.select && studio.mode != 'pose') {
       return [
         const Text(

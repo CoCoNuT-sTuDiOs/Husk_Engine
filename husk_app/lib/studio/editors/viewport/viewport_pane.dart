@@ -55,6 +55,9 @@ class _ViewportPaneState extends State<ViewportPane> {
   // The joint being dragged with the Select tool (null when the drag orbits
   // the camera), and whether the drag moves the whole character instead.
   BigInt? _draggedJoint;
+
+  // The joint being moved with the Select tool in Edit Mode.
+  BigInt? _editedJoint;
   bool _dragMovesCharacter = false;
 
   // Whether a weight paint stroke is in progress, and where the brush circle
@@ -240,7 +243,8 @@ int? _gizmoAxis;
         // In Pose Mode, or while placing bones (to pick a parent), tapping a joint
     // dot selects it. In Object Mode the joints cannot be selected.
     final jointsOn =
-          _studio.mode == 'pose' ||
+        _studio.mode == 'pose' ||
+        _studio.mode == 'edit' ||
         _studio.mode == 'weight_paint' ||
         _studio.tool == StudioTool.placeBones;
     final hit =
@@ -265,6 +269,9 @@ int? _gizmoAxis;
       );
     } else {
       _studio.selectBone(null);
+      // Edit Mode stays on the object being edited: a click on empty space
+      // only lets go of the selected joint.
+      if (_studio.mode == 'edit') return;
       if (_studio.tool == StudioTool.select ||
           _studio.tool == StudioTool.moveObject ||
           _studio.tool == StudioTool.rotateObject ||
@@ -291,7 +298,13 @@ int? _gizmoAxis;
         final joint = _studio.mode == 'pose'
             ? _viewport.jointAt(details.localPosition, scale)
             : null;
-        _draggedJoint = joint;
+      _draggedJoint = joint;
+        // Edit Mode moves the joint itself, in the rest pose, instead.
+        if (_studio.mode == 'edit') {
+          final edited = _viewport.jointAt(details.localPosition, scale);
+          _editedJoint = edited;
+          if (edited != null) _studio.selectBone(edited);
+        }
         // A root joint has no parent to swing around: dragging it moves
         // the whole character.
         _dragMovesCharacter = joint != null && _viewport.isRoot(joint);
@@ -315,6 +328,11 @@ int? _gizmoAxis;
     final x = details.localPosition.dx / scale;
     final y = details.localPosition.dy / scale;
     if (_painting) return;
+    final edited = _editedJoint;
+    if (edited != null) {
+      _studio.moveJoint(edited, x, y);
+      return;
+    }
     if (_surfaceDrag) {
       _updateSurfaceDrag(details.localPosition, scale);
       return;
@@ -516,6 +534,7 @@ int? _gizmoAxis;
 
 void _endDrag() {
     _surfaceDrag = false;
+    _editedJoint = null;
     _draggedJoint = null;
     _gizmoAxis = null;
     _gizmoHighlight.value = null;
@@ -724,6 +743,22 @@ void _endDrag() {
                     fit: StackFit.expand,
                     children: [
                       _buildRender(context, textureId),
+                      Positioned(
+                        right: 14,
+                        top: 14,
+                        child: FirstTimeHint(
+                          studio: _studio,
+                          id: 'edit_mode',
+                          visibleWhen: (studio) => studio.mode == 'edit',
+                          title: 'Edit Mode',
+                          lines: const [
+                            'Click a joint dot to select it. Drag it to move it: the bones below it stay where they are.',
+                            'The Place bones tool drops a new bone where you click, below the selected joint. With nothing selected it starts a new root.',
+                            'Delete removes the selected bone: the bones below it join its parent. Ctrl+Z undoes.',
+                            'Edit Mode shows the rest pose. Tab goes back to Object Mode.',
+                          ],
+                        ),
+                      ),
                       Positioned(
                         right: 14,
                         top: 14,

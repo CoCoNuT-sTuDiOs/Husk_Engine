@@ -76,6 +76,22 @@ pub struct Object {
 }
 
 impl Object {
+     /// Deletes the bone `bone` of this object's skeleton and brings everything
+    /// that counts bones by number into step: the skin weights (the deleted
+    /// bone's weight goes to its parent), the pose and every key. Returns what
+    /// changed in the numbering, or None, changing nothing, for an unknown bone.
+    pub fn remove_bone(&mut self, bone: usize) -> Option<crate::rig::bone_edit::Removal> {
+        let removal = crate::rig::bone_edit::remove_bone(&mut self.skeleton, bone)?;
+        if let Some(weights) = self.weights.as_mut() {
+            crate::rig::bone_edit::remap_weights(weights, &removal);
+        }
+        crate::rig::bone_edit::remap_rotations(&mut self.pose.rotations, &removal);
+        for key in self.timeline.keys.iter_mut() {
+            crate::rig::bone_edit::remap_rotations(&mut key.rotations, &removal);
+        }
+        Some(removal)
+    }
+
     /// Every moment (seconds) that has a key on this object, bones or
     /// anything else, earliest first, with keys at nearly the same moment
     /// counted once.
@@ -775,6 +791,48 @@ pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
         }
     }
 
+        /// Deletes bone `bone` of the object at `index` (see `Object::remove_bone`).
+    /// Objects that follow one of its bones follow the deleted bone's parent
+    /// instead, or the object itself when the bone had none. False, changing
+    /// nothing, for an unknown object or bone, or a locked object.
+    pub fn remove_bone(&mut self, index: usize, bone: usize) -> bool {
+        let Some(object) = self.objects.get_mut(index) else {
+            return false;
+        };
+        if object.locked {
+            return false;
+        }
+        let owner_id = object.id;
+        let Some(removal) = object.remove_bone(bone) else {
+            return false;
+        };
+        if owner_id != 0 {
+            for other in self.objects.iter_mut() {
+                if let Some(link) = other.parent.as_mut() {
+                    if link.parent_id == owner_id {
+                        if let Some(followed) = link.bone {
+                            link.bone = removal.follow(followed);
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Moves joint `bone` of the object at `index` to `position`, in that
+    /// object's own space, at rest (see `bone_edit::move_joint`). False, changing
+    /// nothing, for an unknown object or joint, a locked object, or a position
+    /// that is not a number.
+    pub fn move_joint(&mut self, index: usize, bone: usize, position: glam::Vec3) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) if !object.locked => {
+                crate::rig::bone_edit::move_joint(&mut object.skeleton, bone, position)
+            }
+            _ => false,
+        }
+    }
+
     /// Locks or unlocks the object at `index`. False, changing nothing, for
     /// an unknown index.
     pub fn set_locked(&mut self, index: usize, locked: bool) -> bool {
@@ -1265,6 +1323,40 @@ pub fn set_active_preserve_volume(enabled: bool) -> Option<usize> {
     scene.push_undo(None);
     scene.objects[index].preserve_volume = enabled;
     Some(index)
+}
+
+/// Deletes a bone of the active object as one undo step (see
+/// `Scene::remove_bone`). False, changing nothing, when it cannot be deleted.
+pub fn remove_active_bone(bone: usize) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    match guard.scenes.get_mut(scene_index) {
+        Some(scene) => {
+            let index = scene.active_object;
+            scene.change_with_undo(|scene| scene.remove_bone(index, bone))
+        }
+        None => false,
+    }
+}
+
+/// Moves a joint of the active object (see `Scene::move_joint`). A drag that
+/// moves the same joint many times in a row is one undo step.
+pub fn move_active_joint(bone: usize, position: glam::Vec3) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let Some(scene) = guard.scenes.get_mut(scene_index) else {
+        return false;
+    };
+    let index = scene.active_object;
+    let editable = scene
+        .objects
+        .get(index)
+        .is_some_and(|object| !object.locked && bone < object.skeleton.bones.len())
+        && position.is_finite();
+    if editable {
+        scene.push_undo(Some("joint"));
+    }
+    scene.move_joint(index, bone, position)
 }
 
 /// Whether the active object is a rig.
@@ -2221,6 +2313,79 @@ fn a_duplicate_is_a_new_object_beside_the_original_and_keeps_its_parent() {
         assert!(!scene.objects[0].preserve_volume);
         assert!(scene.redo());
         assert!(scene.objects[0].preserve_volume);
+    }
+
+    #[test]
+        fn deleting_a_bone_renumbers_the_weights_the_pose_and_the_keys_and_followers_follow() {
+        let mut scene = scene_with(2, 0);
+        // Object 0: root, a (above root), b (above a). Object 1 follows b.
+        let root = scene.objects[0].skeleton.add_bone("root", None, glam::Vec3::ZERO);
+        let a = scene.objects[0]
+            .skeleton
+            .add_bone("a", Some(root), glam::Vec3::new(0.0, 1.0, 0.0));
+        scene.objects[0]
+            .skeleton
+            .add_bone("b", Some(a), glam::Vec3::new(0.0, 1.0, 0.0));
+        scene.objects[0].weights = Some(vec![VertexWeights {
+            joint_indices: [1, 2, 0, 0],
+            weights: [0.5, 0.5, 0.0, 0.0],
+        }]);
+        scene.objects[0].pose = crate::animation::pose::Pose::rest_for(&scene.objects[0].skeleton);
+        scene.objects[0]
+            .timeline
+            .set_key(0.0, vec![glam::Quat::IDENTITY; 3]);
+        assert!(scene.set_parent_to_bone(1, 0, 2));
+
+        assert!(scene.remove_bone(0, 1));
+
+        let object = &scene.objects[0];
+        let names: Vec<&str> = object.skeleton.bones.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, vec!["root", "b"]);
+        // The share of "a" went to the root, and "b" is now bone 1.
+        let weights = &object.weights.as_ref().unwrap()[0];
+        assert_eq!(weights.joint_indices[0], 0);
+        assert_eq!(weights.joint_indices[1], 1);
+        assert!((weights.weights[0] - 0.5).abs() < 1e-6);
+        assert!((weights.weights[1] - 0.5).abs() < 1e-6);
+        assert_eq!(object.pose.rotations.len(), 2);
+        assert_eq!(object.timeline.keys[0].rotations.len(), 2);
+        // The part that followed "b" follows it under its new number.
+        assert_eq!(scene.objects[1].parent.unwrap().bone, Some(1));
+    }
+
+    #[test]
+    fn a_part_that_followed_a_deleted_bone_follows_its_parent_or_the_object() {
+        let mut scene = scene_with_an_arm();
+        assert!(scene.set_parent_to_bone(1, 0, 1));
+        // Deleting the arm: the part follows the root.
+        assert!(scene.remove_bone(0, 1));
+        assert_eq!(scene.objects[1].parent.unwrap().bone, Some(0));
+        assert_eq!(scene.objects[0].skeleton.bones.len(), 1);
+        // Deleting the root: the part follows the object itself.
+        assert!(scene.remove_bone(0, 0));
+        assert_eq!(scene.objects[1].parent.unwrap().bone, None);
+        assert_eq!(scene.parent_of(1), Some(0));
+        assert!(scene.objects[0].skeleton.bones.is_empty());
+    }
+
+    #[test]
+    fn the_bones_of_a_locked_object_cannot_be_deleted_or_moved() {
+        let mut scene = scene_with_an_arm();
+        let wanted = glam::Vec3::new(2.0, 0.0, 0.0);
+        assert!(scene.set_locked(0, true));
+        assert!(!scene.remove_bone(0, 1));
+        assert!(!scene.move_joint(0, 1, wanted));
+        assert_eq!(scene.objects[0].skeleton.bones.len(), 2);
+
+        assert!(scene.set_locked(0, false));
+        assert!(scene.move_joint(0, 1, wanted));
+        let moved = scene.objects[0].skeleton.world_bind_matrices()[1]
+            .transform_point3(glam::Vec3::ZERO);
+        assert!((moved - wanted).length() < 1e-5);
+        // Unknown objects and bones are refused.
+        assert!(!scene.remove_bone(9, 0));
+        assert!(!scene.remove_bone(0, 9));
+        assert!(!scene.move_joint(9, 0, wanted));
     }
 
     #[test]

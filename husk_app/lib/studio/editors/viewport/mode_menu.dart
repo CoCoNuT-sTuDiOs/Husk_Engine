@@ -13,7 +13,9 @@ class ModeMenu extends StatelessWidget {
   static String label(String mode) {
     switch (mode) {
       case 'pose':
-        return 'Pose Mode';
+      return 'Pose Mode';
+      case 'edit':
+        return 'Edit Mode';
       case 'weight_paint':
         return 'Weight Paint';
       default:
@@ -26,7 +28,7 @@ class ModeMenu extends StatelessWidget {
     final studio = actions.studio;
     final current = studio.mode;
     return PopupMenuButton<String>(
-      tooltip: 'Mode (Ctrl+Tab switches between Object and Pose)',
+      tooltip: 'Mode (Tab: Object and Edit. Ctrl+Tab: Object and Pose)',
       onSelected: (name) => actions.setMode(context, name),
       itemBuilder: (_) => [
         for (final name in studio.availableModes)

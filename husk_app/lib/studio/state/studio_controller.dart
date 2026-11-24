@@ -142,18 +142,19 @@ final Set<String> _seenHints = <String>{};
   /// True while the viewport fills the window and the other panes are hidden.
   bool get viewportMaximized => _viewportMaximized;
 
-    /// The tools each mode offers. Place bones stays in Object mode until the
-  /// rig gets its own Edit mode.
+    /// The tools each mode offers. Place bones now lives in Edit Mode, which offers Select and
+  /// Place bones. Object mode keeps the object tools.
   static List<StudioTool> toolsInMode(String mode) {
     switch (mode) {
       case 'pose':
         return const [StudioTool.select, StudioTool.move];
       case 'weight_paint':
-        return const [StudioTool.select];
+                return const [StudioTool.select];
+      case 'edit':
+        return const [StudioTool.select, StudioTool.placeBones];
       default:
         return const [
           StudioTool.select,
-          StudioTool.placeBones,
           StudioTool.moveObject,
           StudioTool.rotateObject,
           StudioTool.scaleObject,
@@ -178,17 +179,26 @@ final Set<String> _seenHints = <String>{};
   String? setMode(String name) {
     if (rust.setMode(name: name)) {
       // Weight Paint always has a bone to show: the first one until you pick.
-      if (name == 'weight_paint') _selectedBone ??= BigInt.zero;
+    if (name == 'weight_paint') _selectedBone ??= BigInt.zero;
+      // Edit Mode works on the rest pose, so a pose the character was left
+      // in goes back to rest.
+      if (name == 'edit') {
+        rust.resetPose();
+        rust.refreshModels();
+      }
       notifyListeners();
       return null;
     }
     switch (name) {
       case 'pose':
         return 'Pose Mode needs a rig, or a mesh that has bones. '
-            'Use Place bones first.';
+            'Use Edit Mode and Place bones first.';
+                case 'edit':
+        return 'Edit Mode needs a rig or a shape. Add a rig, or drop a shape '
+            'from the tray, first.';
       case 'weight_paint':
         return 'Weight Paint needs a mesh that has bones. '
-            'Use Place bones first.';
+            'Use Edit Mode and Place bones first.';  
       default:
         return 'This object cannot go into that mode';
     }
@@ -196,7 +206,10 @@ final Set<String> _seenHints = <String>{};
 
   /// Ctrl+Tab: between Object mode and Pose mode, as Blender does on an
   /// armature.
-String? toggleObjectPose() => setMode(mode == 'pose' ? 'object' : 'pose');
+  String? toggleObjectPose() => setMode(mode == 'pose' ? 'object' : 'pose');
+
+  /// Tab: between Object mode and Edit mode, as Blender does.
+  String? toggleObjectEdit() => setMode(mode == 'edit' ? 'object' : 'edit');
 
 /// Whether the first-time hint card named [id] has been closed already.
 bool hintSeen(String id) => !_hintsLoaded || _seenHints.contains(id);
@@ -430,6 +443,8 @@ if (!_seenHints.add(id)) return;
     final index = rust.addRig();
     if (index == null) return 'Could not add a rig';
     selectObject(index.toInt());
+// Bones are placed in Edit Mode.
+    setMode('edit');
     setTool(StudioTool.placeBones);
     notifyListeners();
     return null;
@@ -807,6 +822,23 @@ final (removed, parent) = rust.undoLastBone();
         ? 'Weights computed for ${rust.boneCount()} bones '
             'in ${timer.elapsedMilliseconds} ms'
         : 'Weight computation failed (no bones placed yet?)';
+  }
+
+  /// Edit Mode: drags joint [bone] onto render pixel ([x], [y]) and leaves it
+  /// there. The bones below it stay where they are.
+  void moveJoint(BigInt bone, double x, double y) {
+    if (rust.moveJointToCursor(bone: bone, x: x, y: y)) notifyListeners();
+  }
+
+  /// Edit Mode: deletes the selected bone. The bones below it join its parent.
+  /// Nothing is selected afterwards, as in Blender. Returns a message.
+  String deleteSelectedBone() {
+    final bone = _selectedBone;
+    if (bone == null) return 'Select a joint first: click its dot';
+    if (!rust.deleteBone(bone: bone)) return 'Could not delete that bone';
+    _selectedBone = null;
+    notifyListeners();
+    return 'Deleted bone $bone';
   }
 
   void resetPose() {

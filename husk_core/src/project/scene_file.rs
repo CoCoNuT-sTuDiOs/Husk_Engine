@@ -110,6 +110,8 @@ struct ObjectData {
     #[serde(default)]
     parent: Option<ParentData>,
     #[serde(default)]
+    preserve_volume: bool,
+    #[serde(default)]
     bones: Vec<BoneData>,
     #[serde(default)]
     pose_rotations: Vec<[f32; 4]>,
@@ -359,7 +361,8 @@ fn object_data(
             roughness: object.material.roughness,
             metalness: object.material.metalness,
         },
-        locked: object.locked,
+         locked: object.locked,
+        preserve_volume: object.preserve_volume,
         parent: object.parent.map(|link| ParentData {
             parent_id: link.parent_id,
             inverse: link.inverse.to_cols_array(),
@@ -790,6 +793,7 @@ fn object_from_data(
         id: entry.id,
         parent,
         locked: entry.locked,
+        preserve_volume: entry.preserve_volume,
         mesh,
         ..Object::default()
     })
@@ -965,6 +969,7 @@ mod tests {
         body.mesh = Some(mesh.clone());
         body.transform.translation = Vec3::new(1.0, 2.0, 3.0);
         body.material.roughness = 0.9;
+        body.preserve_volume = true;
         body.skeleton.add_bone("root", None, Vec3::ZERO);
         body.skeleton.add_bone("arm", Some(0), Vec3::new(0.0, 1.0, 0.0));
         body.weights = Some(vec![
@@ -1023,6 +1028,9 @@ mod tests {
         assert_eq!(body.transform, scene.objects[1].transform);
         assert_eq!(body.material, scene.objects[1].material);
         assert_eq!(body.skeleton.bones.len(), 2);
+        // Preserve volume comes back on for the body and stays off for the others.
+        assert!(body.preserve_volume);
+        assert!(!loaded.objects[2].preserve_volume);
         assert_eq!(body.skeleton.bones[1].parent, Some(0));
         let mesh = body.mesh.as_ref().expect("the body keeps its mesh");
         assert_eq!(mesh.positions, triangle().positions);

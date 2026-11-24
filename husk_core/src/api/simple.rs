@@ -477,6 +477,56 @@ pub fn bone_parents() -> Vec<Option<usize>> {
 }
 
 
+
+/// Deletes bone `bone` of the active object as one undo step. The weights, the
+/// pose and every key are renumbered with it, and parts that followed the bone
+/// follow its parent instead. False, changing nothing, for an unknown bone or a
+/// locked object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn delete_bone(bone: usize) -> bool {
+    if !crate::scene::remove_active_bone(bone) {
+        return false;
+    }
+    rebuild_renderer_from_scene();
+    true
+}
+
+/// Drags joint `bone` onto the cursor at screen pixel (x, y), on a plane
+/// through the joint that faces the camera, and leaves it there at rest.
+/// A drag is one undo step. False, changing nothing, for an unknown bone, a
+/// locked object, or when there is no active renderer.
+#[flutter_rust_bridge::frb(sync)]
+pub fn move_joint_to_cursor(bone: usize, x: f64, y: f64) -> bool {
+    // Joints live in the object's own space; the cursor and the camera's
+    // drag plane are in the scene. Taken before any scene lock.
+    let space = crate::scene::active_transform().1;
+    let joint_world = {
+        let active = crate::scene::active_object();
+        let world_matrices = active.skeleton.world_bind_matrices();
+        let Some(matrix) = world_matrices.get(bone) else {
+            return false;
+        };
+        space.point_to_world(matrix.transform_point3(glam::Vec3::ZERO))
+    };
+    let Some(target) = crate::platform::ffi::with_active_renderer(|renderer| {
+        renderer.screen_to_view_plane(x as f32, y as f32, joint_world)
+    })
+    .flatten() else {
+        return false;
+    };
+    if !crate::scene::move_active_joint(bone, space.point_to_local(target)) {
+        return false;
+    }
+    let skin_matrices = {
+        let mut active = crate::scene::active_object();
+        let crate::scene::Object { skeleton, pose, .. } = &mut *active;
+        pose.ensure_covers(&skeleton);
+        pose.skinning_matrices(&skeleton)
+    };
+    crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
+    true
+}
+
 /// Clears the current skeleton and any computed weights, so you can
 /// start placing bones over from a clean state.
 #[flutter_rust_bridge::frb(sync)]

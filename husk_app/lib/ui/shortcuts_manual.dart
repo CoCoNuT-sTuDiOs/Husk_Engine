@@ -86,12 +86,28 @@ const List<ShortcutSection> shortcutSections = [
   ]),
   ShortcutSection('Modes', [
     ShortcutEntry(
+      'Tab',
+      'Switch between Object Mode and Edit Mode (a rig, or a shape that can hold bones)',
+    ),
+    ShortcutEntry(
       'Ctrl+Tab',
       'Switch between Object Mode and Pose Mode (a rig, or a mesh that has bones)',
     ),
     ShortcutEntry(
       'Mode menu (viewport header)',
-      'Pick Object Mode, Pose Mode or Weight Paint, whichever the active object allows',
+      'Pick Object Mode, Edit Mode, Pose Mode or Weight Paint, whichever the active object allows',
+    ),
+  ]),
+  ShortcutSection('Edit Mode', [
+    ShortcutEntry('Click a joint dot', 'Select that joint'),
+    ShortcutEntry(
+      'Drag a joint dot (Select tool)',
+      'Move that joint. The bones below it stay where they are',
+    ),
+    ShortcutEntry('Click (Place bones tool)', 'Place a bone below the selected joint'),
+    ShortcutEntry(
+      'Delete',
+      'Delete the selected bone. The bones below it join its parent',
     ),
   ]),
   ShortcutSection('Weight Paint', [
