@@ -17,8 +17,8 @@ class ToolColumn extends StatelessWidget {
   Widget build(BuildContext context) {
 final collapsed = studio.toolsCollapsed && !floating;
     return Container(
-      width: collapsed ? 20 : 52,
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      width: collapsed ? 20 : 36,
+      padding: const EdgeInsets.symmetric(vertical: 4),
       decoration: floating
           ? BoxDecoration(
               color: HuskColors.panel.withValues(alpha: 0.92),
@@ -146,9 +146,10 @@ class _ToolButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           onTap: onTap,
           child: Container(
-            width: 40,
-            height: 40,
-            margin: const EdgeInsets.symmetric(vertical: 2),
+             width: 28,
+            height: 28,
+            margin: const EdgeInsets.symmetric(vertical: 1),
+
             decoration: BoxDecoration(
               color: selected
                   ? HuskColors.blue.withValues(alpha: 0.2)
@@ -161,7 +162,7 @@ class _ToolButton extends StatelessWidget {
             child: IconTheme(
               data: IconThemeData(
                 color: selected ? HuskColors.blue : HuskColors.textSecondary,
-                size: 22,
+                size: 16,
               ),
               child: Center(child: icon),
             ),

@@ -25,6 +25,15 @@ class TimelineController extends ChangeNotifier {
   double? get repeatSeconds => _repeatPeriod;
   double get travel => _travelSpeed;
 
+  // Whether the track is folded away, leaving only the header.
+  bool _collapsed = false;
+  bool get collapsed => _collapsed;
+
+  void toggleCollapsed() {
+    _collapsed = !_collapsed;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _playTimer?.cancel();

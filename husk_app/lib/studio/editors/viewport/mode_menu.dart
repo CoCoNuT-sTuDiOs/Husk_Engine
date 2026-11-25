@@ -39,7 +39,7 @@ class ModeMenu extends StatelessWidget {
           ),
       ],
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           border: Border.all(color: HuskColors.border),
           borderRadius: BorderRadius.circular(6),
@@ -49,7 +49,7 @@ class ModeMenu extends StatelessWidget {
           children: [
             Text(
               label(current),
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
             ),
             const SizedBox(width: 6),
             const Icon(

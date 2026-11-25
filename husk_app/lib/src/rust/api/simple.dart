@@ -160,17 +160,57 @@ bool deleteBone({required BigInt bone}) =>
 
 /// Drags joint `bone` onto the cursor at screen pixel (x, y), on a plane
 /// through the joint that faces the camera, and leaves it there at rest.
-/// A drag is one undo step. False, changing nothing, for an unknown bone, a
+/// With `save_undo` a drag is one undo step; without it (a grab, which saved its
+/// own step) none is saved. With `mirror` on, the joint with the flipped name
+/// (`arm.L` and `arm.R`) moves to the other side as well. False, changing
+/// nothing, for an unknown bone, a
 /// locked object, or when there is no active renderer.
 bool moveJointToCursor({
   required BigInt bone,
   required double x,
   required double y,
+  required bool saveUndo,
+  required bool mirror,
 }) => RustLib.instance.api.crateApiSimpleMoveJointToCursor(
   bone: bone,
   x: x,
   y: y,
+  saveUndo: saveUndo,
+  mirror: mirror,
 );
+
+/// Starts a grab: everything it does until `grab_cancel` is one undo step.
+/// False, changing nothing, when the active object cannot be edited.
+bool grabBegin() => RustLib.instance.api.crateApiSimpleGrabBegin();
+
+/// Adds a joint below joint `parent` of the active object, in the same place
+/// as `parent`, ready to be dragged out (Blender's Extrude on a bone's tip).
+/// Call `grab_begin` first. Returns its number, or None, changing nothing, for
+/// an unknown joint or a locked object.
+BigInt? extrudeJoint({required BigInt parent}) =>
+    RustLib.instance.api.crateApiSimpleExtrudeJoint(parent: parent);
+
+/// Takes back everything since `grab_begin`: a moved joint goes back, an
+/// extruded joint is gone. False, changing nothing, when nothing was saved.
+bool grabCancel() => RustLib.instance.api.crateApiSimpleGrabCancel();
+
+/// Mirrors joint `bone` of the active object, and every joint below it, across
+/// the centre (the plane x = 0 of the object's own space) as one undo step.
+/// Returns the copy of `bone`, or None, changing nothing, for an unknown joint
+/// or a locked object.
+BigInt? symmetrizeBone({required BigInt bone}) =>
+    RustLib.instance.api.crateApiSimpleSymmetrizeBone(bone: bone);
+
+/// The name of bone `bone` of the active object, or None for an unknown bone.
+String? boneName({required BigInt bone}) =>
+    RustLib.instance.api.crateApiSimpleBoneName(bone: bone);
+
+/// Renames bone `bone` of the active object as one undo step. A name another
+/// bone has gets a number, and an empty name becomes the default name, as in
+/// Blender. Returns the name the bone has now, or None, changing nothing, for an
+/// unknown bone or a locked object.
+String? renameBone({required BigInt bone, required String name}) =>
+    RustLib.instance.api.crateApiSimpleRenameBone(bone: bone, name: name);
 
 /// Clears the current skeleton and any computed weights, so you can
 /// start placing bones over from a clean state.

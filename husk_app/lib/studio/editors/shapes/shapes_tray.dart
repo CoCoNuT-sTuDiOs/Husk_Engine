@@ -78,7 +78,8 @@ class _ShapesTrayState extends State<ShapesTray> {
         border: Border(top: BorderSide(color: HuskColors.border)),
       ),
       child: CollapsibleSection(
-        title: 'Shapes',
+           title: 'Shapes',
+        initiallyExpanded: false,
         child: SizedBox(
           height: _previewSize + 22,
           child: ListView(

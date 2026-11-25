@@ -6,6 +6,7 @@ show ObjectMaterial, ObjectTransform, WorldSettings;
 import 'package:husk_app/studio/state/studio_actions.dart';
 import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
+import 'package:husk_app/ui/messages.dart';
 import 'package:husk_app/ui/widgets/collapsible_section.dart';
 import 'package:husk_app/ui/widgets/readout_row.dart';
 import 'package:husk_app/ui/widgets/number_field.dart';
@@ -817,7 +818,94 @@ class _SkeletonSection extends StatelessWidget {
         ReadoutRow(label: 'Bones', value: '${studio.boneCount}'),
         ReadoutRow(label: 'Selected', value: selectedText),
         ReadoutRow(label: 'Parent', value: parentText),
+        if (selected != null)
+          _BoneNameField(
+            key: ValueKey(selected),
+            studio: studio,
+            bone: selected,
+          ),
       ],
+    );
+  }
+}
+
+
+/// The name of the selected bone as a text box: Enter, or a click anywhere else,
+/// applies it. A name another bone has gets a number.
+class _BoneNameField extends StatefulWidget {
+  const _BoneNameField({super.key, required this.studio, required this.bone});
+
+  final StudioController studio;
+  final BigInt bone;
+
+  @override
+  State<_BoneNameField> createState() => _BoneNameFieldState();
+}
+
+class _BoneNameFieldState extends State<_BoneNameField> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_applyWhenLeft);
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_applyWhenLeft);
+    _focus.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _applyWhenLeft() {
+    if (!_focus.hasFocus) _apply();
+  }
+
+  void _apply() {
+    final current = widget.studio.boneName(widget.bone);
+    if (current == null || _controller.text == current) return;
+    final message = widget.studio.renameBone(widget.bone, _controller.text);
+    if (message != null && mounted) showMessage(context, message);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = widget.studio.boneName(widget.bone) ?? '';
+    // Until the box is being typed in, it shows the bone's real name.
+    if (!_focus.hasFocus && _controller.text != name) _controller.text = name;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 74,
+            child: Text('Name', style: HuskText.readout),
+          ),
+          Expanded(
+            child: SizedBox(
+              height: 30,
+              child: TextField(
+                controller: _controller,
+                focusNode: _focus,
+                style: const TextStyle(fontSize: 12),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                ),
+                onSubmitted: (_) => _apply(),
+                onTapOutside: (_) => _focus.unfocus(),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -38,7 +38,7 @@ class IconAction extends StatelessWidget {
           ? HuskColors.textDisabled
           : HuskColors.textPrimary;
       background = Colors.transparent;
-      outline = HuskColors.border;
+      outline = Colors.transparent;
     }
 
     return Tooltip(
@@ -53,10 +53,10 @@ class IconAction extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           onTap: onPressed,
           child: SizedBox(
-            width: 32,
-            height: 32,
+            width: 24,
+            height: 24,
             child: IconTheme(
-              data: IconThemeData(color: foreground, size: 18),
+              data: IconThemeData(color: foreground, size: 15),
               child: Center(child: icon),
             ),
           ),

@@ -845,6 +845,85 @@ pub fn set_parent(&mut self, child: usize, parent: Option<usize>) -> bool {
         }
     }
 
+
+        /// Adds a joint below joint `parent` of the object at `index`, in the same
+    /// place as `parent`, so it can be dragged out from there (Blender's Extrude
+    /// on a bone's tip). It becomes the last joint. None, changing nothing, for an
+    /// unknown object or joint, or a locked object. It saves no undo step: a grab
+    /// saves its own (see `begin_grab`).
+    pub fn extrude_joint(&mut self, index: usize, parent: usize) -> Option<usize> {
+        let object = self.objects.get_mut(index)?;
+        if object.locked || parent >= object.skeleton.bones.len() {
+            return None;
+        }
+        let name = format!("bone_{}", object.skeleton.bones.len());
+        Some(object.skeleton.add_bone(&name, Some(parent), glam::Vec3::ZERO))
+    }
+
+    /// Goes back to the state saved by the last `push_undo` and forgets that
+    /// step, so it cannot be redone either: the way out of a grab that was
+    /// cancelled. False, changing nothing, when nothing was saved.
+    pub fn cancel_last_edit(&mut self) -> bool {
+        let Some(previous) = self.undo_stack.pop() else {
+            return false;
+        };
+        self.restore(previous);
+        self.last_edit = None;
+        self.revision += 1;
+        true
+    }
+
+    /// Mirrors joint `bone` of the object at `index`, and everything below it,
+    /// across the centre of the object (see `bone_edit::symmetrize`). Returns the
+    /// new joints, the copy of `bone` first. None, changing nothing, for an
+    /// unknown object or joint, or a locked object. It saves no undo step.
+    pub fn symmetrize_joint(&mut self, index: usize, bone: usize) -> Option<Vec<usize>> {
+        let object = self.objects.get_mut(index)?;
+        if object.locked {
+            return None;
+        }
+        crate::rig::bone_edit::symmetrize(&mut object.skeleton, bone)
+    }
+
+    /// Renames bone `bone` of the object at `index` (see `bone_edit::rename_bone`).
+    /// Returns the name it has now and whether that changed anything, or None,
+    /// changing nothing, for an unknown object or bone, or a locked object. It
+    /// saves no undo step.
+    pub fn rename_bone(
+        &mut self,
+        index: usize,
+        bone: usize,
+        wanted: &str,
+    ) -> Option<(String, bool)> {
+        let object = self.objects.get_mut(index)?;
+        if object.locked {
+            return None;
+        }
+        crate::rig::bone_edit::rename_bone(&mut object.skeleton, bone, wanted)
+    }
+
+    /// Moves joint `bone` of the object at `index` like `move_joint` and, with
+    /// `mirror` on, the joint that mirrors it too (see
+    /// `bone_edit::move_joint_mirrored`). False, changing nothing, for an unknown
+    /// object or joint, a locked object, or a position that is not a number.
+    pub fn move_joint_mirrored(
+        &mut self,
+        index: usize,
+        bone: usize,
+        position: glam::Vec3,
+        mirror: bool,
+    ) -> bool {
+        match self.objects.get_mut(index) {
+            Some(object) if !object.locked => crate::rig::bone_edit::move_joint_mirrored(
+                &mut object.skeleton,
+                bone,
+                position,
+                mirror,
+            ),
+            _ => false,
+        }
+    }
+
     /// Locks every object except the active one, which is unlocked: the
     /// "work on this one only" switch.
     pub fn lock_all_except_active(&mut self) {
@@ -1341,7 +1420,7 @@ pub fn remove_active_bone(bone: usize) -> bool {
 
 /// Moves a joint of the active object (see `Scene::move_joint`). A drag that
 /// moves the same joint many times in a row is one undo step.
-pub fn move_active_joint(bone: usize, position: glam::Vec3) -> bool {
+pub fn move_active_joint(bone: usize, position: glam::Vec3, mirror: bool) -> bool {
     let mut guard = PROJECT.lock().unwrap();
     let scene_index = guard.active_scene;
     let Some(scene) = guard.scenes.get_mut(scene_index) else {
@@ -1356,7 +1435,96 @@ pub fn move_active_joint(bone: usize, position: glam::Vec3) -> bool {
     if editable {
         scene.push_undo(Some("joint"));
     }
-    scene.move_joint(index, bone, position)
+    scene.move_joint_mirrored(index, bone, position, mirror)
+    }
+
+/// Starts a grab (Blender's G, or E after an extrude): saves ONE undo step for
+/// everything the grab does, so cancelling it (see `cancel_grab`) takes the
+/// whole grab back. False, changing nothing, when the active object cannot be
+/// edited.
+pub fn begin_grab() -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let Some(scene) = guard.scenes.get_mut(scene_index) else {
+        return false;
+    };
+    let editable = scene
+        .objects
+        .get(scene.active_object)
+        .is_some_and(|object| !object.locked);
+    if editable {
+        scene.push_undo(None);
+    }
+    editable
+}
+
+/// Adds a joint below `parent` of the active object (see
+/// `Scene::extrude_joint`). Call `begin_grab` first: this saves no undo step
+/// of its own.
+pub fn extrude_active_joint(parent: usize) -> Option<usize> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    let index = scene.active_object;
+    scene.extrude_joint(index, parent)
+}
+
+/// Moves a joint of the active object like `move_active_joint`, but saves no
+/// undo step: a grab saved its one step when it began.
+pub fn move_active_joint_quietly(bone: usize, position: glam::Vec3, mirror: bool) -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let Some(scene) = guard.scenes.get_mut(scene_index) else {
+        return false;
+    };
+    let index = scene.active_object;
+    scene.move_joint_mirrored(index, bone, position, mirror)
+}
+
+/// Takes back everything since `begin_grab`. False, changing nothing, when
+/// nothing was saved.
+pub fn cancel_grab() -> bool {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    guard
+        .scenes
+        .get_mut(scene_index)
+        .map_or(false, |scene| scene.cancel_last_edit())
+}
+
+/// Mirrors a joint of the active object and everything below it as one undo
+/// step (see `Scene::symmetrize_joint`). Returns the new joints, the copy of
+/// `bone` first, or None, changing nothing, when it cannot be done.
+pub fn symmetrize_active_bone(bone: usize) -> Option<Vec<usize>> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    let index = scene.active_object;
+    let mut made: Option<Vec<usize>> = None;
+    scene.change_with_undo(|scene| {
+        made = scene.symmetrize_joint(index, bone);
+        made.is_some()
+    });
+    made
+}
+
+/// Renames a bone of the active object as one undo step (see
+/// `Scene::rename_bone`); a name that changes nothing saves no step. Returns the
+/// name the bone has now, or None, changing nothing, when it cannot be done.
+pub fn rename_active_bone(bone: usize, wanted: &str) -> Option<String> {
+    let mut guard = PROJECT.lock().unwrap();
+    let scene_index = guard.active_scene;
+    let scene = guard.scenes.get_mut(scene_index)?;
+    let index = scene.active_object;
+    let mut given: Option<String> = None;
+    scene.change_with_undo(|scene| match scene.rename_bone(index, bone, wanted) {
+        Some((name, changed)) => {
+            given = Some(name);
+            changed
+        }
+        None => false,
+    });
+    given
 }
 
 /// Whether the active object is a rig.
@@ -2386,6 +2554,104 @@ fn a_duplicate_is_a_new_object_beside_the_original_and_keeps_its_parent() {
         assert!(!scene.remove_bone(9, 0));
         assert!(!scene.remove_bone(0, 9));
         assert!(!scene.move_joint(9, 0, wanted));
+    }
+
+    #[test]
+    fn extruding_a_joint_adds_a_child_in_the_same_place_and_cancelling_takes_it_all_back() {
+        let mut scene = scene_with_an_arm();
+        // The arm joint is at (1, 0, 0). A grab saves its one step first.
+        scene.push_undo(None);
+        let new = scene.extrude_joint(0, 1).expect("the arm joint exists");
+        assert_eq!(new, 2);
+        assert_eq!(scene.objects[0].skeleton.bones[2].parent, Some(1));
+        let at = scene.objects[0].skeleton.world_bind_matrices()[2]
+            .transform_point3(glam::Vec3::ZERO);
+        assert!((at - glam::Vec3::new(1.0, 0.0, 0.0)).length() < 1e-5);
+
+        // Dragged out: moving saves no undo step of its own.
+        let steps = scene.undo_stack.len();
+        assert!(scene.move_joint(0, 2, glam::Vec3::new(1.0, 2.0, 0.0)));
+        assert_eq!(scene.undo_stack.len(), steps);
+
+        // Cancelled: the new joint is gone and there is nothing to redo.
+        assert!(scene.cancel_last_edit());
+        assert_eq!(scene.objects[0].skeleton.bones.len(), 2);
+        assert!(scene.redo_stack.is_empty());
+        assert!(!scene.undo());
+    }
+
+    #[test]
+    fn a_joint_cannot_be_extruded_from_an_unknown_joint_or_a_locked_object() {
+        let mut scene = scene_with_an_arm();
+        assert!(scene.extrude_joint(0, 5).is_none());
+        assert!(scene.extrude_joint(9, 0).is_none());
+        assert!(scene.set_locked(0, true));
+        assert!(scene.extrude_joint(0, 1).is_none());
+        assert_eq!(scene.objects[0].skeleton.bones.len(), 2);
+        // Nothing was saved, so there is nothing to cancel.
+        assert!(!scene.cancel_last_edit());
+    }
+
+    #[test]
+    fn a_locked_object_cannot_be_mirrored_and_a_mirror_adds_the_copies() {
+        let mut scene = scene_with_an_arm();
+        // The arm joint (bone 1) is at (1, 0, 0) below the root.
+        assert!(scene.set_locked(0, true));
+        assert!(scene.symmetrize_joint(0, 1).is_none());
+        assert_eq!(scene.objects[0].skeleton.bones.len(), 2);
+        assert!(scene.set_locked(0, false));
+        let made = scene.symmetrize_joint(0, 1).expect("the arm joint exists");
+        assert_eq!(made, vec![2]);
+        assert_eq!(scene.objects[0].skeleton.bones.len(), 3);
+        assert!(scene.symmetrize_joint(9, 0).is_none());
+    }
+
+    #[test]
+    fn a_rename_is_one_undo_step_and_the_same_name_or_a_locked_object_changes_nothing() {
+        let mut scene = scene_with_an_arm();
+        assert!(scene.change_with_undo(|scene| {
+            scene
+                .rename_bone(0, 1, "wrist")
+                .is_some_and(|(_, changed)| changed)
+        }));
+        assert_eq!(scene.objects[0].skeleton.bones[1].name, "wrist");
+        assert!(scene.undo());
+        assert_eq!(scene.objects[0].skeleton.bones[1].name, "arm");
+
+        // The same name saves no undo step.
+        assert!(!scene.change_with_undo(|scene| {
+            scene
+                .rename_bone(0, 1, "arm")
+                .is_some_and(|(_, changed)| changed)
+        }));
+        assert!(scene.undo_stack.is_empty());
+
+        // A locked object keeps its names, and unknown bones and objects are refused.
+        assert!(scene.set_locked(0, true));
+        assert!(scene.rename_bone(0, 1, "x").is_none());
+        assert_eq!(scene.objects[0].skeleton.bones[1].name, "arm");
+        assert!(scene.set_locked(0, false));
+        assert!(scene.rename_bone(0, 9, "x").is_none());
+        assert!(scene.rename_bone(9, 0, "x").is_none());
+    }
+
+    #[test]
+    fn a_mirrored_move_moves_the_twin_and_a_locked_object_moves_nothing() {
+        let mut scene = scene_with(1, 0);
+        let root = scene.objects[0].skeleton.add_bone("root", None, glam::Vec3::ZERO);
+        let left = scene.objects[0]
+            .skeleton
+            .add_bone("arm.L", Some(root), glam::Vec3::new(1.0, 1.0, 0.0));
+        let right = scene.objects[0]
+            .skeleton
+            .add_bone("arm.R", Some(root), glam::Vec3::new(-1.0, 1.0, 0.0));
+        assert!(scene.set_locked(0, true));
+        assert!(!scene.move_joint_mirrored(0, left, glam::Vec3::new(2.0, 2.0, 0.0), true));
+        assert!(scene.set_locked(0, false));
+        assert!(scene.move_joint_mirrored(0, left, glam::Vec3::new(2.0, 2.0, 0.0), true));
+        let world = scene.objects[0].skeleton.world_bind_matrices();
+        let twin = world[right].transform_point3(glam::Vec3::ZERO);
+        assert!((twin - glam::Vec3::new(-2.0, 2.0, 0.0)).length() < 1e-5);
     }
 
     #[test]

@@ -493,10 +493,13 @@ pub fn delete_bone(bone: usize) -> bool {
 
 /// Drags joint `bone` onto the cursor at screen pixel (x, y), on a plane
 /// through the joint that faces the camera, and leaves it there at rest.
-/// A drag is one undo step. False, changing nothing, for an unknown bone, a
+/// With `save_undo` a drag is one undo step; without it (a grab, which saved its
+/// own step) none is saved. With `mirror` on, the joint with the flipped name
+/// (`arm.L` and `arm.R`) moves to the other side as well. False, changing
+/// nothing, for an unknown bone, a
 /// locked object, or when there is no active renderer.
 #[flutter_rust_bridge::frb(sync)]
-pub fn move_joint_to_cursor(bone: usize, x: f64, y: f64) -> bool {
+pub fn move_joint_to_cursor(bone: usize, x: f64, y: f64, save_undo: bool, mirror: bool) -> bool {
     // Joints live in the object's own space; the cursor and the camera's
     // drag plane are in the scene. Taken before any scene lock.
     let space = crate::scene::active_transform().1;
@@ -514,7 +517,13 @@ pub fn move_joint_to_cursor(bone: usize, x: f64, y: f64) -> bool {
     .flatten() else {
         return false;
     };
-    if !crate::scene::move_active_joint(bone, space.point_to_local(target)) {
+    let target_local = space.point_to_local(target);
+    let moved = if save_undo {
+        crate::scene::move_active_joint(bone, target_local, mirror)
+    } else {
+        crate::scene::move_active_joint_quietly(bone, target_local, mirror)
+    };
+    if !moved {
         return false;
     }
     let skin_matrices = {
@@ -525,6 +534,61 @@ pub fn move_joint_to_cursor(bone: usize, x: f64, y: f64) -> bool {
     };
     crate::platform::ffi::with_active_renderer(|renderer| renderer.set_bone_matrices(&skin_matrices));
     true
+}
+
+/// Starts a grab: everything it does until `grab_cancel` is one undo step.
+/// False, changing nothing, when the active object cannot be edited.
+#[flutter_rust_bridge::frb(sync)]
+pub fn grab_begin() -> bool {
+    crate::scene::begin_grab()
+}
+
+/// Adds a joint below joint `parent` of the active object, in the same place
+/// as `parent`, ready to be dragged out (Blender's Extrude on a bone's tip).
+/// Call `grab_begin` first. Returns its number, or None, changing nothing, for
+/// an unknown joint or a locked object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn extrude_joint(parent: usize) -> Option<usize> {
+    crate::scene::extrude_active_joint(parent)
+}
+
+/// Takes back everything since `grab_begin`: a moved joint goes back, an
+/// extruded joint is gone. False, changing nothing, when nothing was saved.
+#[flutter_rust_bridge::frb(sync)]
+pub fn grab_cancel() -> bool {
+    if !crate::scene::cancel_grab() {
+        return false;
+    }
+    rebuild_renderer_from_scene();
+    true
+}
+
+/// Mirrors joint `bone` of the active object, and every joint below it, across
+/// the centre (the plane x = 0 of the object's own space) as one undo step.
+/// Returns the copy of `bone`, or None, changing nothing, for an unknown joint
+/// or a locked object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn symmetrize_bone(bone: usize) -> Option<usize> {
+    crate::scene::symmetrize_active_bone(bone).and_then(|made| made.first().copied())
+}
+
+/// The name of bone `bone` of the active object, or None for an unknown bone.
+#[flutter_rust_bridge::frb(sync)]
+pub fn bone_name(bone: usize) -> Option<String> {
+    crate::scene::active_object()
+        .skeleton
+        .bones
+        .get(bone)
+        .map(|bone| bone.name.clone())
+}
+
+/// Renames bone `bone` of the active object as one undo step. A name another
+/// bone has gets a number, and an empty name becomes the default name, as in
+/// Blender. Returns the name the bone has now, or None, changing nothing, for an
+/// unknown bone or a locked object.
+#[flutter_rust_bridge::frb(sync)]
+pub fn rename_bone(bone: usize, name: String) -> Option<String> {
+    crate::scene::rename_active_bone(bone, &name)
 }
 
 /// Clears the current skeleton and any computed weights, so you can

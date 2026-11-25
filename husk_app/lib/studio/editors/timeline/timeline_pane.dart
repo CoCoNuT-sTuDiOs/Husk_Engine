@@ -16,7 +16,7 @@ class TimelinePane extends StatelessWidget {
   Widget build(BuildContext context) {
     final timeline = actions.timeline;
     return Container(
-      height: 190,
+    // The height comes from the content: the header, and the track unless folded.
       decoration: const BoxDecoration(
         color: HuskColors.panel,
         border: Border(top: BorderSide(color: HuskColors.border)),
@@ -25,10 +25,12 @@ class TimelinePane extends StatelessWidget {
         listenable: timeline,
         builder: (context, _) {
           return Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _TimelineHeader(actions: actions),
-              Expanded(child: TimelineTrack(timeline: timeline)),
+              if (!timeline.collapsed)
+              SizedBox(height: 40, child: TimelineTrack(timeline: timeline)),
             ],
           );
         },
@@ -47,7 +49,7 @@ class _TimelineHeader extends StatelessWidget {
     final timeline = actions.timeline;
     final repeating = timeline.repeatSeconds != null;
     return Container(
-      height: 44,
+      height: 30,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: const BoxDecoration(
         color: HuskColors.elevated,
@@ -91,19 +93,34 @@ class _TimelineHeader extends StatelessWidget {
             selected: repeating,
             icon: PhosphorIcon(PhosphorIconsRegular.repeat),
             tooltip: repeating ? 'Stop repeat' : 'Repeat from the playhead',
-            onPressed: () => actions.toggleRepeat(context),
+          onPressed: () => actions.toggleRepeat(context),
+          ),
+          const SizedBox(width: 6),
+          IconAction(
+            icon: Icon(
+              timeline.collapsed ? Icons.expand_less : Icons.expand_more,
+            ),
+            tooltip: timeline.collapsed ? 'Show the track' : 'Fold the track',
+            onPressed: timeline.toggleCollapsed,
           ),
           const Spacer(),
           const Text('Travel', style: HuskText.readout),
           SizedBox(
             width: 160,
-            child: Slider(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
               value: timeline.travel,
               min: -2,
               max: 2,
               divisions: 40,
               label: '${timeline.travel.toStringAsFixed(1)} units/s',
               onChanged: timeline.changeTravel,
+              ),
             ),
           ),
           SizedBox(

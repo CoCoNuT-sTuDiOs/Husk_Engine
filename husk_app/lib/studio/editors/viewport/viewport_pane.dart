@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:husk_app/studio/editors/shapes/shapes_tray.dart';
 import 'package:husk_app/studio/editors/tools/tool_column.dart';
 import 'package:husk_app/studio/editors/viewport/frame_overlay.dart';
 
@@ -239,8 +240,12 @@ int? _gizmoAxis;
     }
   }
 
-  void _handleTap(TapUpDetails details, double scale) {
-        // In Pose Mode, or while placing bones (to pick a parent), tapping a joint
+void _handleTap(TapUpDetails details, double scale) {
+    if (_studio.grabbing) {
+      _studio.confirmGrab();
+      return;
+    }
+    // In Pose Mode, or while placing bones (to pick a parent), tapping a joint
     // dot selects it. In Object Mode the joints cannot be selected.
     final jointsOn =
         _studio.mode == 'pose' ||
@@ -286,7 +291,8 @@ int? _gizmoAxis;
     }
   }
 
-  void _handlePanStart(DragStartDetails details, double scale) {
+void _handlePanStart(DragStartDetails details, double scale) {
+    if (_studio.grabbing) return;
     _draggedJoint = null;
     _dragMovesCharacter = false;
     _gizmoAxis = null;
@@ -328,6 +334,10 @@ int? _gizmoAxis;
     final x = details.localPosition.dx / scale;
     final y = details.localPosition.dy / scale;
     if (_painting) return;
+    if (_studio.grabbing) {
+      _studio.grabTo(x, y);
+      return;
+    }
     final edited = _editedJoint;
     if (edited != null) {
       _studio.moveJoint(edited, x, y);
@@ -535,6 +545,7 @@ int? _gizmoAxis;
 void _endDrag() {
     _surfaceDrag = false;
     _editedJoint = null;
+    if (_studio.grabbing) _studio.confirmGrab();
     _draggedJoint = null;
     _gizmoAxis = null;
     _gizmoHighlight.value = null;
@@ -588,8 +599,20 @@ void _endDrag() {
           onPointerHover: (event) {
             _brushCursor.value = event.localPosition;
             _updateHover(event.localPosition, scale);
+            if (_studio.grabbing) {
+              _studio.grabTo(
+                event.localPosition.dx / scale,
+                event.localPosition.dy / scale,
+              );
+            }
           },
-          onPointerDown: (event) => _paintDown(event, scale),
+          onPointerDown: (event) {
+            if (_studio.grabbing && event.buttons == kSecondaryMouseButton) {
+              _studio.cancelGrab();
+              return;
+            }
+            _paintDown(event, scale);
+          },
           onPointerMove: (event) {
             _paintMove(event, scale);
             _handleMiddleDrag(event, scale);
@@ -743,6 +766,41 @@ void _endDrag() {
                     fit: StackFit.expand,
                     children: [
                       _buildRender(context, textureId),
+                      if (!_studio.viewportMaximized)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 12,
+                          child: Center(
+                            child: SizedBox(
+                              width: 1000,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: ShapesTray(studio: _studio),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (!_studio.viewportMaximized && !_studio.toolsCollapsed)
+                        Positioned(
+                          left: 12,
+                          top: 12,
+                          child: ToolColumn(studio: _studio, floating: true),
+                        ),
+                      Positioned(
+                        left: 14,
+                        bottom: 14,
+                        child: FirstTimeHint(
+                          studio: _studio,
+                          id: 'edit_grab',
+                          visibleWhen: (studio) => studio.grabbing,
+                          title: 'Moving a joint',
+                          lines: const [
+                            'The joint follows the mouse. Click to put it down.',
+                            'Esc or a right click cancels, and a bone made with E goes away.',
+                          ],
+                        ),
+                      ),
                       Positioned(
                         right: 14,
                         top: 14,

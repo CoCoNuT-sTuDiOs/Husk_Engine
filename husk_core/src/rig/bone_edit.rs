@@ -193,6 +193,313 @@ pub fn remap_rotations(rotations: &mut Vec<Quat>, removal: &Removal) {
     }
 }
 
+/// Whether `byte` separates a name from a side letter: `.`, a space, `-` or `_`
+/// (Blender's `is_char_sep`).
+fn is_name_separator(byte: u8) -> bool {
+    matches!(byte, b'.' | b' ' | b'-' | b'_')
+}
+
+/// The first place `word` (in lower case) appears in `text`, ignoring case.
+fn find_ignoring_case(text: &str, word: &str) -> Option<usize> {
+    let (text, word) = (text.as_bytes(), word.as_bytes());
+    if word.len() > text.len() {
+        return None;
+    }
+    (0..=text.len() - word.len())
+        .find(|&start| text[start..start + word.len()].eq_ignore_ascii_case(word))
+}
+
+/// The name with its side flipped (left becomes right and the other way round),
+/// as Blender's `BLI_string_flip_side_name` does it with the numbers kept:
+/// - a name shorter than 3 characters is left alone;
+/// - a `.###` number at the end is set aside and put back after;
+/// - a side letter after a separator at the end (`arm.L`, `leg_r`, `hand L`) or
+///   before one at the start (`L_arm`, `r.hand`) swaps, keeping its case;
+/// - for names longer than 5 characters, the word `left` or `right` at the very
+///   start or end swaps (`Left_arm`, `armRIGHT`), keeping its case.
+/// A name with none of these comes back unchanged.
+pub fn flip_side_name(name: &str) -> String {
+    if name.len() < 3 {
+        return name.to_string();
+    }
+    let mut body = name;
+    let mut number = "";
+    if name.as_bytes()[name.len() - 1].is_ascii_digit() {
+        if let Some(dot) = name.rfind('.') {
+            if name
+                .as_bytes()
+                .get(dot + 1)
+                .is_some_and(|byte| byte.is_ascii_digit())
+            {
+                body = &name[..dot];
+                number = &name[dot..];
+            }
+        }
+    }
+
+    let bytes = body.as_bytes();
+    let length = bytes.len();
+    let mut prefix = body.to_string();
+    let mut suffix = String::new();
+    let mut replace: Option<&str> = None;
+    let mut is_set = false;
+
+    // A side letter after a separator, at the end.
+    if length > 1 && is_name_separator(bytes[length - 2]) {
+        is_set = true;
+        match bytes[length - 1] {
+            b'l' => {
+                prefix.truncate(length - 1);
+                replace = Some("r");
+            }
+            b'r' => {
+                prefix.truncate(length - 1);
+                replace = Some("l");
+            }
+            b'L' => {
+                prefix.truncate(length - 1);
+                replace = Some("R");
+            }
+            b'R' => {
+                prefix.truncate(length - 1);
+                replace = Some("L");
+            }
+            _ => is_set = false,
+        }
+    }
+
+    // A side letter at the start, before a separator.
+    if !is_set && bytes.get(1).is_some_and(|byte| is_name_separator(*byte)) {
+        is_set = true;
+        match bytes[0] {
+            b'l' => replace = Some("r"),
+            b'r' => replace = Some("l"),
+            b'L' => replace = Some("R"),
+            b'R' => replace = Some("L"),
+            _ => is_set = false,
+        }
+        if is_set {
+            suffix = body[1..].to_string();
+            prefix.clear();
+        }
+    }
+
+    // The word left or right at the very start or end.
+    if !is_set && length > 5 {
+        let right = find_ignoring_case(&prefix, "right");
+        let left = find_ignoring_case(&prefix, "left");
+        if let Some(index) = right.filter(|&index| index == 0 || index == length - 5) {
+            let word = &prefix[index..index + 5];
+            replace = Some(if word.starts_with('r') {
+                "left"
+            } else if word.as_bytes()[1] == b'I' {
+                "LEFT"
+            } else {
+                "Left"
+            });
+            suffix = prefix[index + 5..].to_string();
+            prefix.truncate(index);
+        } else if let Some(index) = left.filter(|&index| index == 0 || index == length - 4) {
+            let word = &prefix[index..index + 4];
+            replace = Some(if word.starts_with('l') {
+                "right"
+            } else if word.as_bytes()[1] == b'E' {
+                "RIGHT"
+            } else {
+                "Right"
+            });
+            suffix = prefix[index + 4..].to_string();
+            prefix.truncate(index);
+        }
+    }
+
+    format!("{prefix}{}{suffix}{number}", replace.unwrap_or(""))
+}
+
+/// The name a mirrored copy of a bone gets: the name with its side flipped (see
+/// `flip_side_name`). A name with no side to flip gets `.R` added. That last part
+/// is Husk's own rule.
+fn mirrored_name(name: &str) -> String {
+    let flipped = flip_side_name(name);
+    if flipped != name {
+        flipped
+    } else {
+        format!("{name}.R")
+    }
+}
+
+
+/// What a bone is called when it is given no name. Blender uses its own
+/// `animrig::bone_default_name`, whose value is in a file not read yet, so this
+/// one is Husk's choice for now.
+pub const DEFAULT_BONE_NAME: &str = "Bone";
+
+/// The most characters a bone name can have. This is Husk's own limit.
+pub const MAX_BONE_NAME_CHARS: usize = 64;
+
+/// Splits a trailing number off a name, as Blender's `BLI_string_split_name_number`
+/// does: the part before the last `delim`, and the number after it, when
+/// everything after the last `delim` is digits that fit in an `i32`. Any other
+/// name comes back whole, with 0.
+fn split_name_number(name: &str, delim: char) -> (&str, i32) {
+    let Some(at) = name.rfind(delim) else {
+        return (name, 0);
+    };
+    let digits = &name[at + delim.len_utf8()..];
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return (name, 0);
+    }
+    match digits.parse::<i32>() {
+        Ok(number) => (&name[..at], number),
+        Err(_) => (name, 0),
+    }
+}
+
+/// `wanted` when no bone has that name. Otherwise the same name with a number,
+/// counting up from the number it already ends in (`.001` when it has none) until
+/// no bone has it: `arm.R` becomes `arm.R.001`, and `arm.R.001` becomes
+/// `arm.R.002` (Blender's `BLI_uniquename_cb` with a `.`). An empty name becomes
+/// `DEFAULT_BONE_NAME` first.
+fn unique_name(skeleton: &Skeleton, wanted: &str) -> String {
+    let name = if wanted.is_empty() {
+        DEFAULT_BONE_NAME
+    } else {
+        wanted
+    };
+    let taken = |other: &str| skeleton.bones.iter().any(|bone| bone.name == other);
+    if !taken(name) {
+        return name.to_string();
+    }
+    let (left, mut number) = split_name_number(name, '.');
+    loop {
+        number = number.saturating_add(1);
+        let candidate = if left.is_empty() {
+            format!(".{number:03}")
+        } else {
+            format!("{left}.{number:03}")
+        };
+        if !taken(&candidate) {
+            return candidate;
+        }
+    }
+}
+
+/// Renames bone `index` to `wanted`, the way Blender's `ED_armature_bone_rename`
+/// treats the name itself: the same name changes nothing, and any other is made
+/// unique (see `unique_name`; the bone's own old name counts as taken, as in
+/// Blender). Husk keeps names to `MAX_BONE_NAME_CHARS` characters. Bones are
+/// numbered everywhere else (weights, pose, keys, parts that follow a bone), so
+/// nothing else needs to change. Returns the name the bone has now and whether
+/// that is a change, or None, changing nothing, for an unknown bone.
+pub fn rename_bone(skeleton: &mut Skeleton, index: usize, wanted: &str) -> Option<(String, bool)> {
+    if index >= skeleton.bones.len() {
+        return None;
+    }
+    let wanted: String = wanted.chars().take(MAX_BONE_NAME_CHARS).collect();
+    if skeleton.bones[index].name == wanted {
+        return Some((wanted, false));
+    }
+    let name = unique_name(skeleton, &wanted);
+    let changed = skeleton.bones[index].name != name;
+    skeleton.bones[index].name = name.clone();
+    Some((name, changed))
+}
+
+
+/// The joint that mirrors joint `index`: the one whose name is `index`'s name
+/// with its side flipped (`arm.L` and `arm.R`), as Blender's
+/// `ED_armature_ebone_get_mirrored` finds it. None for a name with no side to
+/// flip, for an unknown joint, or when no joint has the flipped name.
+pub fn mirror_twin(skeleton: &Skeleton, index: usize) -> Option<usize> {
+    let name = &skeleton.bones.get(index)?.name;
+    let flipped = flip_side_name(name);
+    if flipped == *name {
+        return None;
+    }
+    skeleton.bones.iter().position(|bone| bone.name == flipped)
+}
+
+/// `move_joint`, and with `mirror` on the twin of the joint (see `mirror_twin`)
+/// goes to the other side of the centre at once with its X flipped: Blender's
+/// X-Axis Mirror, which copies the moved point to the mirrored bone with its X
+/// negated (`ED_armature_ebone_transform_mirror_update`). The twin's children stay
+/// where they are, as for any moved joint. False, changing nothing, when the
+/// joint cannot be moved.
+pub fn move_joint_mirrored(
+    skeleton: &mut Skeleton,
+    index: usize,
+    position: Vec3,
+    mirror: bool,
+) -> bool {
+    if !move_joint(skeleton, index, position) {
+        return false;
+    }
+    if mirror {
+        if let Some(twin) = mirror_twin(skeleton, index) {
+            if twin != index {
+                move_joint(skeleton, twin, Vec3::new(-position.x, position.y, position.z));
+            }
+        }
+    }
+    true
+}
+
+/// Mirrors joint `index` and every joint below it across the plane x = 0 of the
+/// skeleton's own space (left becomes right). The copy of `index` hangs from the
+/// same parent as `index`; every other copy hangs from the copy of its parent.
+/// Copies are plain joints (no turn, no scale), named by `mirrored_name` and made
+/// unique. Returns the numbers of the copies, the copy of `index` first. None,
+/// changing nothing, for an unknown joint.
+pub fn symmetrize(skeleton: &mut Skeleton, index: usize) -> Option<Vec<usize>> {
+    let count = skeleton.bones.len();
+    if index >= count {
+        return None;
+    }
+    // The joint and everything below it.
+    let mut inside = vec![false; count];
+    inside[index] = true;
+    loop {
+        let mut grew = false;
+        for bone in 0..count {
+            if inside[bone] {
+                continue;
+            }
+            if let Some(parent) = skeleton.bones[bone].parent {
+                if inside[parent] {
+                    inside[bone] = true;
+                    grew = true;
+                }
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+
+    let world = skeleton.world_bind_matrices();
+    let mut copy_of: Vec<Option<usize>> = vec![None; count];
+    let mut made = Vec::new();
+    for bone in (0..count).filter(|&bone| inside[bone]) {
+        let at = world[bone].transform_point3(Vec3::ZERO);
+        let mirrored_at = Vec3::new(-at.x, at.y, at.z);
+        let parent = if bone == index {
+            skeleton.bones[bone].parent
+        } else {
+            skeleton.bones[bone].parent.and_then(|parent| copy_of[parent])
+        };
+        let parent_world = match parent {
+            Some(parent) => skeleton.world_bind_matrices()[parent],
+            None => Mat4::IDENTITY,
+        };
+        let name = unique_name(skeleton, &mirrored_name(&skeleton.bones[bone].name));
+        let local = parent_world.inverse().transform_point3(mirrored_at);
+        let new_index = skeleton.add_bone(&name, parent, local);
+        copy_of[bone] = Some(new_index);
+        made.push(new_index);
+    }
+    Some(made)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +636,201 @@ mod tests {
         assert!(close(at(&skeleton, "a"), Vec3::new(0.0, 1.0, 0.0)));
         assert!(close(at(&skeleton, "side"), Vec3::new(1.0, 0.0, 0.0)));
         assert!(close(at(&skeleton, "tip"), Vec3::new(0.0, 3.0, 0.0)));
+    }
+
+    #[test]
+    fn mirroring_a_joint_copies_it_across_the_centre_with_the_same_parent() {
+        let mut skeleton = tree();
+        // "side" (bone 3) is at (1, 0, 0) below the root.
+        let copies = symmetrize(&mut skeleton, 3).expect("bone 3 exists");
+        assert_eq!(copies, vec![5]);
+        assert_eq!(skeleton.bones[5].parent, Some(0));
+        assert_eq!(skeleton.bones[5].name, "side.R");
+        assert!(close(at(&skeleton, "side.R"), Vec3::new(-1.0, 0.0, 0.0)));
+        // The original did not move.
+        assert!(close(at(&skeleton, "side"), Vec3::new(1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn mirroring_a_joint_takes_everything_below_it_along() {
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, Vec3::ZERO);
+        let arm = skeleton.add_bone("arm.L", Some(root), Vec3::new(1.0, 0.0, 0.0));
+        skeleton.add_bone("hand.L", Some(arm), Vec3::new(1.0, 0.5, 0.25));
+        skeleton.add_bone("head", Some(root), Vec3::new(0.0, 2.0, 0.0));
+
+        let copies = symmetrize(&mut skeleton, arm).expect("the arm exists");
+        // Two copies, the arm and the hand. The head is not below the arm.
+        assert_eq!(copies.len(), 2);
+        assert_eq!(skeleton.bones.len(), 6);
+        assert_eq!(skeleton.bones[copies[0]].name, "arm.R");
+        assert_eq!(skeleton.bones[copies[1]].name, "hand.R");
+        assert_eq!(skeleton.bones[copies[0]].parent, Some(root));
+        assert_eq!(skeleton.bones[copies[1]].parent, Some(copies[0]));
+        assert!(close(at(&skeleton, "arm.R"), Vec3::new(-1.0, 0.0, 0.0)));
+        assert!(close(at(&skeleton, "hand.R"), Vec3::new(-2.0, 0.5, 0.25)));
+        // The originals stay where they were.
+        assert!(close(at(&skeleton, "hand.L"), Vec3::new(2.0, 0.5, 0.25)));
+    }
+
+    #[test]
+    fn mirroring_works_in_space_even_when_the_parent_is_turned() {
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, Vec3::ZERO);
+        skeleton.bones[root].local_rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let arm = skeleton.add_bone("arm", Some(root), Vec3::new(1.0, 1.0, 0.0));
+        // The root turns (1, 1, 0) a quarter: the arm is at (-1, 1, 0) in space.
+        assert!(close(at(&skeleton, "arm"), Vec3::new(-1.0, 1.0, 0.0)));
+
+        let copies = symmetrize(&mut skeleton, arm).expect("the arm exists");
+        assert_eq!(copies.len(), 1);
+        assert!(close(at(&skeleton, "arm.R"), Vec3::new(1.0, 1.0, 0.0)));
+    }
+
+    #[test]
+    fn a_mirrored_name_swaps_the_side_or_adds_one_and_is_never_taken_twice() {
+        assert_eq!(mirrored_name("arm.L"), "arm.R");
+        assert_eq!(mirrored_name("arm.R"), "arm.L");
+        assert_eq!(mirrored_name("leg_L"), "leg_R");
+        assert_eq!(mirrored_name("leg_R"), "leg_L");
+        assert_eq!(mirrored_name("spine"), "spine.R");
+
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, Vec3::ZERO);
+        let arm = skeleton.add_bone("arm.L", Some(root), Vec3::new(1.0, 0.0, 0.0));
+        let first = symmetrize(&mut skeleton, arm).unwrap()[0];
+        let second = symmetrize(&mut skeleton, arm).unwrap()[0];
+        assert_eq!(skeleton.bones[first].name, "arm.R");
+        assert_eq!(skeleton.bones[second].name, "arm.R.001");
+        assert!(symmetrize(&mut skeleton, 99).is_none());
+        assert_eq!(skeleton.bones.len(), 4);
+    }
+
+    #[test]
+    fn flipping_a_name_follows_blenders_rules() {
+        for (name, flipped) in [
+            ("arm.L", "arm.R"),
+            ("arm.R", "arm.L"),
+            ("leg_l", "leg_r"),
+            ("hand R", "hand L"),
+            ("L_arm", "R_arm"),
+            ("r.hand", "l.hand"),
+            ("arm.L.001", "arm.R.001"),
+            ("Left_arm", "Right_arm"),
+            ("LEFT_arm", "RIGHT_arm"),
+            ("arm_RIGHT", "arm_LEFT"),
+            ("armLeft", "armRight"),
+            ("rightarm", "leftarm"),
+            ("myleft", "myright"),
+        ] {
+            assert_eq!(flip_side_name(name), flipped, "{name}");
+        }
+        // Nothing to flip, or too short to have a side: the name stays.
+        for name in [
+            "spine", "Bone.001", "head", ".R", "L", "left", "Right", "arm_left_x", "L.001",
+        ] {
+            assert_eq!(flip_side_name(name), name, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_taken_name_gets_a_number_the_way_blender_counts_it() {
+        let mut skeleton = Skeleton::default();
+        for name in ["arm.R", "arm.R.001", "x.5", "x.", ".5", "Bone"] {
+            skeleton.add_bone(name, None, Vec3::ZERO);
+        }
+        assert_eq!(unique_name(&skeleton, "free"), "free");
+        // .001 is taken as well, so it goes on to .002.
+        assert_eq!(unique_name(&skeleton, "arm.R"), "arm.R.002");
+        // A number it already ends in is counted up, not added to.
+        assert_eq!(unique_name(&skeleton, "arm.R.001"), "arm.R.002");
+        assert_eq!(unique_name(&skeleton, "x.5"), "x.006");
+        // A dot with nothing after it is not a number.
+        assert_eq!(unique_name(&skeleton, "x."), "x..001");
+        // Nothing before the number: only the number is left.
+        assert_eq!(unique_name(&skeleton, ".5"), ".006");
+        // An empty name becomes the default name, which is taken here.
+        assert_eq!(unique_name(&skeleton, ""), "Bone.001");
+        assert_eq!(unique_name(&Skeleton::default(), ""), "Bone");
+    }
+
+    #[test]
+    fn renaming_a_bone_changes_only_its_name_and_a_taken_name_gets_a_number() {
+        let mut skeleton = tree();
+        let world_before = skeleton.world_bind_matrices();
+        let parents_before = parents(&skeleton);
+
+        assert_eq!(
+            rename_bone(&mut skeleton, 1, "upper_arm"),
+            Some((String::from("upper_arm"), true))
+        );
+        assert_eq!(skeleton.bones[1].name, "upper_arm");
+        // The same name changes nothing.
+        assert_eq!(
+            rename_bone(&mut skeleton, 1, "upper_arm"),
+            Some((String::from("upper_arm"), false))
+        );
+        // A name another bone has gets a number.
+        assert_eq!(
+            rename_bone(&mut skeleton, 2, "tip"),
+            Some((String::from("tip.001"), true))
+        );
+        // An empty name becomes the default name.
+        assert_eq!(
+            rename_bone(&mut skeleton, 3, ""),
+            Some((String::from("Bone"), true))
+        );
+        // A name that is too long is held to the limit.
+        let long = "x".repeat(100);
+        let (given, _) = rename_bone(&mut skeleton, 4, &long).expect("bone 4 exists");
+        assert_eq!(given.chars().count(), MAX_BONE_NAME_CHARS);
+        // An unknown bone changes nothing.
+        assert_eq!(rename_bone(&mut skeleton, 99, "x"), None);
+
+        // Only names changed: not the parents, not where anything is.
+        assert_eq!(parents(&skeleton), parents_before);
+        assert_eq!(skeleton.world_bind_matrices(), world_before);
+    }
+
+    #[test]
+    fn a_joints_twin_is_the_one_with_the_flipped_name() {
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, Vec3::ZERO);
+        let left = skeleton.add_bone("arm.L", Some(root), Vec3::new(1.0, 1.0, 0.0));
+        let right = skeleton.add_bone("arm.R", Some(root), Vec3::new(-1.0, 1.0, 0.0));
+        let lonely = skeleton.add_bone("leg_L", Some(root), Vec3::new(0.5, -1.0, 0.0));
+        assert_eq!(mirror_twin(&skeleton, left), Some(right));
+        assert_eq!(mirror_twin(&skeleton, right), Some(left));
+        // No side in the name, or no joint with the flipped name, or no such joint.
+        assert_eq!(mirror_twin(&skeleton, root), None);
+        assert_eq!(mirror_twin(&skeleton, lonely), None);
+        assert_eq!(mirror_twin(&skeleton, 99), None);
+    }
+
+    #[test]
+    fn moving_a_joint_with_mirror_on_moves_its_twin_to_the_other_side() {
+        let mut skeleton = Skeleton::default();
+        let root = skeleton.add_bone("root", None, Vec3::ZERO);
+        let left = skeleton.add_bone("arm.L", Some(root), Vec3::new(1.0, 1.0, 0.0));
+        let right = skeleton.add_bone("arm.R", Some(root), Vec3::new(-1.0, 1.0, 0.0));
+        skeleton.add_bone("hand.R", Some(right), Vec3::new(-1.0, 0.0, 0.0));
+        // hand.R is at (-2, 1, 0).
+
+        // Mirror off: only the joint that was moved changes.
+        assert!(move_joint_mirrored(&mut skeleton, left, Vec3::new(2.0, 2.0, 0.5), false));
+        assert!(close(at(&skeleton, "arm.L"), Vec3::new(2.0, 2.0, 0.5)));
+        assert!(close(at(&skeleton, "arm.R"), Vec3::new(-1.0, 1.0, 0.0)));
+
+        // Mirror on: the twin follows with its X flipped, and its child stays put.
+        assert!(move_joint_mirrored(&mut skeleton, left, Vec3::new(3.0, 1.5, 0.25), true));
+        assert!(close(at(&skeleton, "arm.L"), Vec3::new(3.0, 1.5, 0.25)));
+        assert!(close(at(&skeleton, "arm.R"), Vec3::new(-3.0, 1.5, 0.25)));
+        assert!(close(at(&skeleton, "hand.R"), Vec3::new(-2.0, 1.0, 0.0)));
+
+        // A joint with no twin just moves, and a joint that does not exist changes nothing.
+        assert!(move_joint_mirrored(&mut skeleton, root, Vec3::new(0.0, 0.5, 0.0), true));
+        assert!(close(at(&skeleton, "arm.R"), Vec3::new(-3.0, 1.5, 0.25)));
+        assert!(!move_joint_mirrored(&mut skeleton, 99, Vec3::ONE, true));
     }
 
     #[test]

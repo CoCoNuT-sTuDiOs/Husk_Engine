@@ -47,7 +47,7 @@ class StudioController extends ChangeNotifier {
   StudioTool _tool = StudioTool.select;
   bool _ikMode = false;
   bool _toolsCollapsed = false;
-  bool _sidePanelCollapsed = false;
+  bool _sidePanelCollapsed = true;
   bool _snapToSurface = false;
 
   // The first-time hint cards the user has already closed.
@@ -178,6 +178,7 @@ final Set<String> _seenHints = <String>{};
   /// object does not allow it.
   String? setMode(String name) {
     if (rust.setMode(name: name)) {
+      _grabbedBone = null;
       // Weight Paint always has a bone to show: the first one until you pick.
     if (name == 'weight_paint') _selectedBone ??= BigInt.zero;
       // Edit Mode works on the rest pose, so a pose the character was left
@@ -233,6 +234,29 @@ bool hintSeen(String id) => !_hintsLoaded || _seenHints.contains(id);
     } catch (error) {
       debugPrint('Husk: the hints could not be saved: $error');
     }
+  }
+
+
+
+// The hint cards that are on screen right now, so that one can be marked as
+  // seen the moment what it describes is over.
+  final Set<String> _hintsOnScreen = <String>{};
+
+  /// Whether the hint card named [id] shows now. [inUse] says whether the thing
+  /// it is about is happening. A card shows while that is going on for the first
+  /// time, and is marked as seen the moment it ends: it never comes back and it
+  /// never needs a click to go away.
+  bool hintVisible(String id, bool inUse) {
+    if (hintSeen(id)) return false;
+    if (inUse) {
+      _hintsOnScreen.add(id);
+      return true;
+    }
+    if (_hintsOnScreen.remove(id)) {
+      // Marked once this frame is built, since marking tells the listeners.
+      Future.microtask(() => markHintSeen(id));
+    }
+    return false;
   }
 
   /// Closes the hint card named [id], so it is not shown again.
@@ -700,7 +724,8 @@ final (removed, parent) = rust.undoLastBone();
 
   /// What undo and redo leave behind: a joint selected before means nothing
   /// now, and every panel reads the scene again.
-  void _afterHistoryStep() {
+void _afterHistoryStep() {
+    _grabbedBone = null;
     _selectedBone = null;
     notifyListeners();
   }
@@ -824,10 +849,118 @@ final (removed, parent) = rust.undoLastBone();
         : 'Weight computation failed (no bones placed yet?)';
   }
 
+
+  BigInt? _grabbedBone;
+
+  // The joint an extrude grew from, so cancelling goes back to selecting it.
+  BigInt? _extrudedFrom;
+
+  /// True while a joint follows the mouse (G, or E after it grew a new joint):
+  /// a click puts it down, and Esc or a right click cancels.
+  bool get grabbing => _grabbedBone != null;
+
+  /// Edit Mode: starts moving the selected joint with the mouse, or with
+  /// [extrude] a new joint grown out of it (Blender's E). The whole grab is one
+  /// undo step. Returns a message when it cannot start.
+  String? startGrab({required bool extrude}) {
+    if (mode != 'edit') return null;
+    final bone = _selectedBone;
+    if (bone == null) return 'Click a joint dot first, then press E or G';
+    if (!rust.grabBegin()) return 'This object is locked';
+    if (extrude) {
+      final grown = rust.extrudeJoint(parent: bone);
+      if (grown == null) {
+        rust.grabCancel();
+        return 'Could not grow a bone from that joint';
+      }
+      _extrudedFrom = bone;
+      _selectedBone = grown;
+      _grabbedBone = grown;
+    } else {
+      _extrudedFrom = null;
+      _grabbedBone = bone;
+    }
+    notifyListeners();
+    return null;
+  }
+
+  /// One step of the grab: the joint follows render pixel ([x], [y]).
+  void grabTo(double x, double y) {
+    final bone = _grabbedBone;
+    if (bone == null) return;
+    if (rust.moveJointToCursor(
+      bone: bone,
+      x: x,
+      y: y,
+      saveUndo: false,
+      mirror: _xMirror,
+    )) {
+      notifyListeners();
+    }
+  }
+
+  /// A click: the joint stays where it is.
+  void confirmGrab() {
+    if (_grabbedBone == null) return;
+    _grabbedBone = null;
+    _extrudedFrom = null;
+    markHintSeen('edit_grab');
+    notifyListeners();
+  }
+
+  /// Esc or a right click: everything since the grab began is taken back, and
+  /// a joint grown by E is gone.
+  void cancelGrab() {
+    if (_grabbedBone == null) return;
+    rust.grabCancel();
+    _grabbedBone = null;
+    _selectedBone = _extrudedFrom ?? _selectedBone;
+    markHintSeen('edit_grab');
+    _extrudedFrom = null;
+    notifyListeners();
+  }
+
+  bool _xMirror = false;
+
+  /// Edit Mode's X-Axis Mirror (Blender's option of the same name): while on,
+  /// moving a joint also moves the joint with the flipped name (`arm.L` and
+  /// `arm.R`) to the other side. Working state: it is not saved in the project.
+  bool get xMirror => _xMirror;
+
+  void toggleXMirror() {
+    _xMirror = !_xMirror;
+    notifyListeners();
+  }
+
   /// Edit Mode: drags joint [bone] onto render pixel ([x], [y]) and leaves it
   /// there. The bones below it stay where they are.
   void moveJoint(BigInt bone, double x, double y) {
-    if (rust.moveJointToCursor(bone: bone, x: x, y: y)) notifyListeners();
+    if (rust.moveJointToCursor(
+      bone: bone,
+      x: x,
+      y: y,
+      saveUndo: true,
+      mirror: _xMirror,
+    )) {
+      notifyListeners();
+    }
+  }
+
+    /// Edit Mode: makes a mirrored copy of the selected joint and every joint
+  /// below it, on the other side of the centre of the object (left becomes
+  /// right), and selects the copy of the selected joint. Returns a message.
+  String symmetrizeSelected() {
+    if (mode != 'edit') return 'Mirror works in Edit Mode';
+    final bone = _selectedBone;
+    if (bone == null) return 'Click a joint dot first, then mirror it';
+    if (_grabbedBone != null) return 'Finish the move first: click, or press Esc';
+    final copy = rust.symmetrizeBone(bone: bone);
+    if (copy == null) {
+      return 'Could not mirror that joint (is the object locked?)';
+    }
+    _selectedBone = copy;
+    notifyListeners();
+    return 'Mirrored bone $bone as bone $copy';
   }
 
   /// Edit Mode: deletes the selected bone. The bones below it join its parent.
@@ -835,10 +968,29 @@ final (removed, parent) = rust.undoLastBone();
   String deleteSelectedBone() {
     final bone = _selectedBone;
     if (bone == null) return 'Select a joint first: click its dot';
+    if (_grabbedBone != null) return 'Finish the move first: click, or press Esc';
     if (!rust.deleteBone(bone: bone)) return 'Could not delete that bone';
     _selectedBone = null;
     notifyListeners();
     return 'Deleted bone $bone';
+  }
+
+
+  /// The name of bone [bone] of the active object, or null for an unknown bone.
+  String? boneName(BigInt bone) => rust.boneName(bone: bone);
+
+  /// Renames bone [bone] of the active object as one undo step. A name another
+  /// bone has gets a number, and an empty name becomes the default name, as in
+  /// Blender. Returns a message when the bone got a different name than the one
+  /// typed, or when it could not be renamed.
+  String? renameBone(BigInt bone, String name) {
+    final given = rust.renameBone(bone: bone, name: name);
+    if (given == null) {
+      return 'Could not rename that bone (is the object locked?)';
+    }
+    notifyListeners();
+    if (name.isNotEmpty && given != name) return 'The bone is called $given';
+    return null;
   }
 
   void resetPose() {

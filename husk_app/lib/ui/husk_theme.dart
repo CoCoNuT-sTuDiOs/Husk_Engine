@@ -27,7 +27,7 @@ class HuskText {
   /// For numbers and technical readouts: times, counts, values.
   static const TextStyle readout = TextStyle(
     fontFamily: mono,
-    fontSize: 12,
+    fontSize: 11,
     color: HuskColors.textSecondary,
   );
 }

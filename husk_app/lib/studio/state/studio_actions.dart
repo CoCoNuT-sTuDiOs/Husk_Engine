@@ -6,6 +6,7 @@ import 'package:husk_app/ui/husk_theme.dart';
 import 'package:husk_app/ui/messages.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:husk_app/ui/shortcuts_manual.dart';
+import 'package:husk_app/ui/widgets/name_dialog.dart';
 import 'package:husk_app/studio/state/keymap.dart';
 
 /// The commands a user can trigger from menus, panels, headers and
@@ -274,11 +275,52 @@ void setBoneParent(BuildContext context, int child, int parent, int bone) =>
 
   /// Ctrl+Tab: between Object mode and Pose mode.
   void toggleMode(BuildContext context) =>
+    
     showMessage(context, studio.toggleObjectPose());
 
   /// Tab: between Object mode and Edit mode.
   void toggleEditMode(BuildContext context) =>
-      showMessage(context, studio.toggleObjectEdit());
+  showMessage(context, studio.toggleObjectEdit());
+
+  /// Edit Mode: grows a new joint out of the selected one and moves it with
+  /// the mouse (E).
+  void extrudeBone(BuildContext context) =>
+      showMessage(context, studio.startGrab(extrude: true));
+
+  /// Edit Mode: moves the selected joint with the mouse (G).
+  void grabBone(BuildContext context) =>
+  showMessage(context, studio.startGrab(extrude: false));
+
+  /// Edit Mode: copies the selected joint, and everything below it, to the
+  /// other side of the centre.
+  void symmetrizeBone(BuildContext context) =>
+    showMessage(context, studio.symmetrizeSelected());
+
+  /// Edit > Rename active item (F2): a small name box for the selected bone, in
+  /// Edit, Pose or Weight Paint Mode. Enter applies the name; Esc closes the box.
+  Future<void> renameActive(BuildContext context) async {
+    final mode = studio.mode;
+    if (mode != 'edit' && mode != 'pose' && mode != 'weight_paint') {
+      showMessage(
+        context,
+        'Rename works on a bone for now: pick a joint in Edit, Pose or Weight Paint Mode',
+      );
+      return;
+    }
+    final bone = studio.selectedBone;
+    if (bone == null) {
+      showMessage(context, 'No active bone: click a joint dot first');
+      return;
+    }
+    final current = studio.boneName(bone);
+    if (current == null) return;
+    final typed = await showDialog<String>(
+      context: context,
+      builder: (_) => NameDialog(title: 'Bone Name', initial: current),
+    );
+    if (typed == null || !context.mounted) return;
+    showMessage(context, studio.renameBone(bone, typed));
+  }
   void setLocked(BuildContext context, int index, bool locked) =>
       showMessage(context, studio.setLocked(index, locked));
 
@@ -452,13 +494,23 @@ void toggleSidePanel() => studio.toggleSidePanelCollapsed();
       case HuskCommand.toggleMode:
     toggleMode(context);
       case HuskCommand.toggleEditMode:
-        toggleEditMode(context);
+      toggleEditMode(context);
+      case HuskCommand.extrudeBone:
+        extrudeBone(context);
+      case HuskCommand.cancelGrab:
+      studio.cancelGrab();
+      case HuskCommand.renameActive:
+        renameActive(context);
       case HuskCommand.brushSmaller:
         studio.nudgeBrushRadius(1 / 1.15);
       case HuskCommand.brushBigger:
         studio.nudgeBrushRadius(1.15);
       case HuskCommand.toolMoveObject:
-         showMessage(context, studio.setTool(StudioTool.moveObject));
+      if (studio.mode == 'edit') {
+          grabBone(context);
+        } else {
+          showMessage(context, studio.setTool(StudioTool.moveObject));
+        }
       case HuskCommand.toolRotateObject:
           showMessage(context, studio.setTool(StudioTool.rotateObject));
       case HuskCommand.toolScaleObject:

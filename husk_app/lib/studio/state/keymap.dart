@@ -38,6 +38,9 @@ enum HuskCommand {
   toggleSidePanel,
   toggleMode,
   toggleEditMode,
+  extrudeBone,
+  cancelGrab,
+  renameActive,
 }
 
 /// One row of the key table.
@@ -158,6 +161,9 @@ KeyBinding(HuskCommand.deleteObject, [LogicalKeyboardKey.delete]),
   KeyBinding(HuskCommand.toggleSidePanel, [LogicalKeyboardKey.keyN]),
   KeyBinding(HuskCommand.toggleMode, [LogicalKeyboardKey.tab], ctrl: true),
   KeyBinding(HuskCommand.toggleEditMode, [LogicalKeyboardKey.tab]),
+  KeyBinding(HuskCommand.extrudeBone, [LogicalKeyboardKey.keyE]),
+  KeyBinding(HuskCommand.cancelGrab, [LogicalKeyboardKey.escape]),
+  KeyBinding(HuskCommand.renameActive, [LogicalKeyboardKey.f2]),
   KeyBinding(
     HuskCommand.brushSmaller,
     [LogicalKeyboardKey.bracketLeft],

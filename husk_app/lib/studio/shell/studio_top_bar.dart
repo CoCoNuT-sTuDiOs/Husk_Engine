@@ -97,7 +97,11 @@ class StudioTopBar extends StatelessWidget {
                         MenuItemButton(
                           trailingIcon: _shortcut('Shift+D'),
                           onPressed: () => actions.duplicate(context),
-                          child: const Text('Duplicate'),
+                        child: const Text('Duplicate'),
+                        ),
+                        MenuItemButton(
+                          onPressed: () => actions.symmetrizeBone(context),
+                          child: const Text('Mirror selected bones'),
                         ),
                         MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+C'),
@@ -107,7 +111,22 @@ class StudioTopBar extends StatelessWidget {
                         MenuItemButton(
                           trailingIcon: _shortcut('Ctrl+V'),
                           onPressed: () => actions.paste(context),
-                          child: const Text('Paste'),
+                        child: const Text('Paste'),
+                        ),
+                        MenuItemButton(
+                          trailingIcon: _shortcut('F2'),
+                          onPressed: () => actions.renameActive(context),
+                        child: const Text('Rename active item...'),
+                        ),
+                        MenuItemButton(
+                          leadingIcon: SizedBox(
+                            width: 16,
+                            child: actions.studio.xMirror
+                                ? const Icon(Icons.check, size: 16)
+                                : null,
+                          ),
+                          onPressed: actions.studio.toggleXMirror,
+                          child: const Text('X-Axis Mirror (Edit Mode)'),
 
                         ),
                         MenuItemButton(

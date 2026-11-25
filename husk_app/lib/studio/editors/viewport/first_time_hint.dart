@@ -3,7 +3,8 @@ import 'package:husk_app/studio/state/studio_controller.dart';
 import 'package:husk_app/ui/husk_theme.dart';
 
 /// A small help card that shows the first time something is used, and never
-/// again once "Got it" is pressed. Help text goes here, not in the header or
+/// again: it counts as seen when that use ends, or when "Got it" is pressed.
+/// Help text goes here, not in the header or
 /// other bars, which have no room for sentences.
 class FirstTimeHint extends StatelessWidget {
   const FirstTimeHint({
@@ -31,7 +32,7 @@ class FirstTimeHint extends StatelessWidget {
     return ListenableBuilder(
       listenable: studio,
       builder: (context, _) {
-        if (studio.hintSeen(id) || !visibleWhen(studio)) {
+        if (!studio.hintVisible(id, visibleWhen(studio))) {
           return const SizedBox.shrink();
         }
         return Container(

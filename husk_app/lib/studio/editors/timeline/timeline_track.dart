@@ -12,7 +12,7 @@ class TimelineTrack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      padding: EdgeInsets.zero,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
@@ -56,12 +56,14 @@ class _TimelinePainter extends CustomPainter {
   final double length;
   final double? repeatPeriod;
 
+static const double _rulerHeight = 20;
+
   Path _diamond(double x, double y) {
     return Path()
-      ..moveTo(x, y - 8)
-      ..lineTo(x + 7, y)
-      ..lineTo(x, y + 8)
-      ..lineTo(x - 7, y)
+      ..moveTo(x, y - 5)
+      ..lineTo(x + 5, y)
+      ..lineTo(x, y + 5)
+      ..lineTo(x - 5, y)
       ..close();
   }
 
@@ -69,7 +71,7 @@ class _TimelinePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final frame = RRect.fromRectAndRadius(
       Offset.zero & size,
-      const Radius.circular(6),
+      Radius.zero,
     );
     canvas.drawRRect(frame, Paint()..color = HuskColors.canvas);
     canvas.drawRRect(
@@ -79,6 +81,25 @@ class _TimelinePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );
+
+// The ruler along the top, as in Blender's timeline: the seconds as
+    // numbers and a small tick every quarter second.
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, _rulerHeight),
+      Paint()..color = HuskColors.elevated,
+    );
+    final tick = Paint()
+      ..color = HuskColors.textDisabled
+      ..strokeWidth = 1;
+    for (var quarter = 0; quarter <= length * 4; quarter++) {
+      if (quarter % 4 == 0) continue;
+      final x = quarter / 4 / length * size.width;
+      canvas.drawLine(
+        Offset(x, _rulerHeight - 5),
+        Offset(x, _rulerHeight),
+        tick,
+      );
+    }
 
     // One gridline and label per second.
     final gridline = Paint()
@@ -94,7 +115,8 @@ class _TimelinePainter extends CustomPainter {
       label.paint(canvas, Offset(x + 4, 4));
     }
 
-    final trackY = size.height * 0.62;
+
+  final trackY = _rulerHeight + (size.height - _rulerHeight) / 2;
 
     // Keyframes as diamonds.
     final keyFill = Paint()..color = HuskColors.orange;
@@ -145,14 +167,33 @@ class _TimelinePainter extends CustomPainter {
         ..color = HuskColors.blue
         ..strokeWidth = 2,
     );
-    canvas.drawPath(
-      Path()
-        ..moveTo(headX - 6, 0)
-        ..lineTo(headX + 6, 0)
-        ..lineTo(headX, 9)
-        ..close(),
-      Paint()..color = HuskColors.blue,
+    final stamp = TextPainter(
+      text: TextSpan(
+        text: time.toStringAsFixed(2),
+        style: HuskText.readout.copyWith(color: Colors.white, fontSize: 11),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final boxCentre = Offset(
+      headX
+          .clamp(stamp.width / 2 + 5, size.width - stamp.width / 2 - 5)
+          .toDouble(),
+      _rulerHeight / 2,
     );
+    final box = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: boxCentre,
+        width: stamp.width + 10,
+        height: _rulerHeight - 4,
+      ),
+      const Radius.circular(3),
+    );
+    canvas.drawRRect(box, Paint()..color = HuskColors.blue);
+    stamp.paint(
+      canvas,
+      Offset(boxCentre.dx - stamp.width / 2, boxCentre.dy - stamp.height / 2),
+    );
+
   }
 
   @override

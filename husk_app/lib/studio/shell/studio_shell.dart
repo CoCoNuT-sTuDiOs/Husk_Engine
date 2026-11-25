@@ -2,9 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:husk_app/studio/editors/shapes/shapes_tray.dart';
 import 'package:husk_app/studio/editors/timeline/timeline_pane.dart';
-import 'package:husk_app/studio/editors/tools/tool_column.dart';
 import 'package:husk_app/studio/editors/viewport/viewport_pane.dart';
 import 'package:husk_app/studio/shell/side_panel.dart';
 import 'package:husk_app/studio/shell/studio_top_bar.dart';
@@ -142,12 +140,10 @@ Widget build(BuildContext context) {
                 }
                 return Row(
                   children: [
-                    ToolColumn(studio: _studio),
                     Expanded(
                       child: Column(
                         children: [
                           Expanded(child: viewport),
-                          ShapesTray(studio: _studio),
                           TimelinePane(actions: _actions),
                         ],
                       ),

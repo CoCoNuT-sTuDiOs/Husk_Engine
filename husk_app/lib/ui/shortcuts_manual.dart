@@ -41,6 +41,10 @@ const List<ShortcutSection> shortcutSections = [
     ShortcutEntry('Shift+D', 'Duplicate the active object beside itself'),
     ShortcutEntry('Ctrl+C', 'Copy the active object'),
     ShortcutEntry('Ctrl+V', 'Paste the copied object'),
+    ShortcutEntry(
+      'F2',
+      'Rename the active item: the selected bone in Edit, Pose or Weight Paint Mode (also Edit > Rename active item...)',
+    ),
   ]),
   ShortcutSection('Move around the view', [
     ShortcutEntry('Middle drag', 'Orbit the view'),
@@ -100,6 +104,26 @@ const List<ShortcutSection> shortcutSections = [
   ]),
   ShortcutSection('Edit Mode', [
     ShortcutEntry('Click a joint dot', 'Select that joint'),
+    ShortcutEntry(
+      'E',
+      'Grow a new bone out of the selected joint and move it with the mouse. Click to put it down',
+    ),
+    ShortcutEntry(
+      'G',
+      'Move the selected joint with the mouse. Click to put it down',
+    ),
+    ShortcutEntry(
+      'Esc or right click (while moving a joint)',
+      'Cancel the move, and a bone just made with E goes away',
+    ),
+    ShortcutEntry(
+      'Mirror button (header), or Edit > Mirror selected bones',
+      'Copy the selected joint and everything below it to the other side of the centre. Left becomes right',
+    ),
+    ShortcutEntry(
+      'X Mirror switch (header), or Edit > X-Axis Mirror',
+      'While on, moving a joint (drag or G) also moves the joint with the flipped name (arm.L and arm.R) to the other side',
+    ),
     ShortcutEntry(
       'Drag a joint dot (Select tool)',
       'Move that joint. The bones below it stay where they are',

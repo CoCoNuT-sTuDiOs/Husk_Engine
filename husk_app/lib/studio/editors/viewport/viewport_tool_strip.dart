@@ -41,6 +41,38 @@ if (studio.mode == 'edit' && studio.tool == StudioTool.select) {
           tooltip: 'Delete the selected bone (Delete)',
           onPressed: () => actions.deleteObject(context),
         ),
+        IconAction(
+          icon: PhosphorIcon(PhosphorIconsRegular.plus),
+          tooltip: 'Extrude a new bone from the selected joint (E)',
+          onPressed: () => actions.extrudeBone(context),
+        ),
+        IconAction(
+          icon: PhosphorIcon(PhosphorIconsRegular.arrowsOutCardinal),
+          tooltip: 'Move the selected joint with the mouse (G)',
+        onPressed: () => actions.grabBone(context),
+        ),
+        IconAction(
+          icon: PhosphorIcon(PhosphorIconsRegular.flipHorizontal),
+          tooltip: 'Mirror the selected joint and everything below it across the centre',
+          onPressed: () => actions.symmetrizeBone(context),
+        ),
+        const SizedBox(width: 10),
+        Tooltip(
+          message:
+              'X-Axis Mirror: moving a joint also moves the joint with the flipped name (arm.L and arm.R)',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('X Mirror', style: HuskText.readout),
+              const SizedBox(width: 6),
+              Switch(
+                value: studio.xMirror,
+                onChanged: (_) => studio.toggleXMirror(),
+              ),
+            ],
+          ),
+
+        ),
       ];
     }
     if (studio.tool == StudioTool.select && studio.mode != 'pose') {
@@ -125,7 +157,7 @@ if (studio.mode == 'edit' && studio.tool == StudioTool.select) {
   Widget build(BuildContext context) {
     final studio = actions.studio;
     return Container(
-      height: 40,
+      height: 32,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: const BoxDecoration(
         color: HuskColors.panel,
@@ -142,7 +174,7 @@ if (studio.mode == 'edit' && studio.tool == StudioTool.select) {
               Text(
                 studio.mode == 'weight_paint' ? 'Weight brush' : _toolName(studio.tool),
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),
               ),
